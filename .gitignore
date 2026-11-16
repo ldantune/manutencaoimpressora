@@ -1,0 +1,6 @@
+bin/
+obj/
+publicado/
+instalador/
+.vs/
+*.user
