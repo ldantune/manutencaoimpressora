@@ -37,7 +37,8 @@ public class FormPrincipal : Form
         _log = log;
         _agendador = agendador;
 
-        Text = "Manutenção da Impressora";
+        var versao = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        Text = $"Manutenção da Impressora - v{versao?.Major}.{versao?.Minor}.{versao?.Build}";
         Font = new Font("Segoe UI", 9.5f);
         AutoScaleMode = AutoScaleMode.Font;
         FormBorderStyle = FormBorderStyle.FixedDialog;

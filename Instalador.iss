@@ -4,7 +4,7 @@
 ; agendamento automático (se houver) ao desinstalar.
 
 #define MyAppName "Manutenção da Impressora"
-#define MyAppVersion "1.0"
+#define MyAppVersion "1.0.0"
 #define MyAppExeName "ManutencaoImpressora.exe"
 
 [Setup]
