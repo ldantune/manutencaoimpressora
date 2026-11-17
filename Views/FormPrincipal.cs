@@ -108,6 +108,7 @@ public class FormPrincipal : Form
         AcceptButton = btnSalvar;
 
         CarregarTela();
+        Load += async (s, e) => await VerificarAtualizacaoAsync();
     }
 
     void Add(Control c, int x, int y)
@@ -215,6 +216,32 @@ public class FormPrincipal : Form
         _agendador.Remover();
         _log.Registrar("Agendamento desativado.");
         AtualizarStatus(LerTela());
+    }
+
+    async Task VerificarAtualizacaoAsync()
+    {
+        var verificador = new VerificadorAtualizacao();
+        var atualizacao = await verificador.VerificarAsync();
+        if (atualizacao is null) return;
+
+        var resposta = MessageBox.Show(
+            $"Uma nova versão (v{atualizacao.Versao}) está disponível. Baixar e instalar agora?\n\n" +
+            "O programa vai fechar para o instalador poder atualizar os arquivos.",
+            Text, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+        if (resposta != DialogResult.Yes) return;
+
+        try
+        {
+            string destino = Path.Combine(Path.GetTempPath(), "ManutencaoImpressora_Instalador.exe");
+            await verificador.BaixarInstaladorAsync(atualizacao.UrlInstalador, destino);
+            Process.Start(new ProcessStartInfo(destino) { UseShellExecute = true });
+            Application.Exit();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Não foi possível baixar a atualização: " + ex.Message, Text,
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     void EscolherDocumento()
