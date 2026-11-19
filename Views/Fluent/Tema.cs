@@ -126,4 +126,5 @@ static class Icones
     public const string Aviso = "";
     public const string Info = "";
     public const string Pasta = "";
+    public const string Rede = "\uE839";
 }

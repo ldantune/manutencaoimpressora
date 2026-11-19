@@ -14,11 +14,17 @@ public class FormPrincipal : Form
 {
     const string NomeApp = "L2 Utilitários";
 
-    readonly TabControl abas = new() { Dock = DockStyle.Fill };
+    const int LarguraMenu = 200;
+    const int LarguraConteudo = 520;
+
+    // Menu lateral (um item por utilitário) e a área onde a ferramenta aparece
+    readonly Panel menuLateral = new() { Dock = DockStyle.Left, Width = LarguraMenu, Padding = new Padding(8, 8, 4, 8) };
+    readonly Panel areaConteudo = new() { Dock = DockStyle.Fill };
+    readonly List<(BotaoNavegacao botao, Control aba)> _itens = new();
+    Control? _abaAtual;
     readonly AbaImpressora abaImpressora;
     readonly AbaRede abaRede;
     readonly NotifyIcon trayIcon = new() { Text = NomeApp };
-    readonly Dictionary<TabPage, IAbaUtilitario> _abasPorPagina = new();
     bool _saindoDeVerdade;
 
     public FormPrincipal(string arquivoConfig, HistoricoLog log, AgendadorTarefa agendador, HistoricoRede historicoRede)
@@ -39,11 +45,14 @@ public class FormPrincipal : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(520, 760);
+        ClientSize = new Size(LarguraMenu + LarguraConteudo, 760);
 
-        AdicionarAba("Impressora", abaImpressora);
-        AdicionarAba("Rede", abaRede);
-        Controls.Add(abas);
+        AdicionarAba("Rede", Icones.Rede, abaRede);
+        AdicionarAba("Impressora", Icones.Imprimir, abaImpressora);
+        Controls.Add(menuLateral);
+        Controls.Add(areaConteudo);
+        areaConteudo.BringToFront();   // o Fill precisa ser encaixado por último
+        _itens[0].botao.Checked = true;
 
         ConfigurarBandeja();
         abaImpressora.StatusMudou += ativo =>
@@ -52,7 +61,6 @@ public class FormPrincipal : Form
         ResumeLayout(false);
         PerformLayout();
 
-        abas.SelectedIndexChanged += (s, e) => AjustarAltura();
         Load += (s, e) => AjustarAltura();
         Load += async (s, e) => await VerificarAtualizacaoAsync();
         Load += (s, e) => abaImpressora.VerificarFalhasRecentes();
@@ -64,28 +72,40 @@ public class FormPrincipal : Form
         Tema.AplicarBarraTitulo(this);
     }
 
-    void AdicionarAba(string titulo, Control controle)
+    void AdicionarAba(string titulo, string icone, Control aba)
     {
-        var pagina = new TabPage(titulo) { BackColor = Tema.Fundo, Padding = new Padding(0) };
-        pagina.Controls.Add(controle);
-        abas.TabPages.Add(pagina);
+        var botao = new BotaoNavegacao { Text = titulo, Icone = icone, AccessibleName = titulo };
+        menuLateral.Controls.Add(botao);
+        botao.BringToFront();          // mantém os itens na ordem em que foram adicionados
 
-        if (controle is IAbaUtilitario aba)
-        {
-            _abasPorPagina[pagina] = aba;
-            aba.AlturaMudou += (s, e) => AjustarAltura();
-        }
+        aba.Dock = DockStyle.Fill;
+        aba.Visible = false;
+        areaConteudo.Controls.Add(aba);
+
+        botao.CheckedChanged += (s, e) => { if (botao.Checked) MostrarAba(aba); };
+        if (aba is IAbaUtilitario utilitario)
+            utilitario.AlturaMudou += (s, e) => { if (aba == _abaAtual) AjustarAltura(); };
+
+        _itens.Add((botao, aba));
     }
 
-    // A altura da janela acompanha o conteúdo da aba selecionada
+    void MostrarAba(Control aba)
+    {
+        if (_abaAtual == aba) return;
+        areaConteudo.SuspendLayout();
+        if (_abaAtual != null) _abaAtual.Visible = false;
+        aba.Visible = true;
+        _abaAtual = aba;
+        areaConteudo.ResumeLayout(true);
+        AjustarAltura();
+    }
+
+    // A altura da janela acompanha o conteúdo do utilitário selecionado
     void AjustarAltura()
     {
-        if (!abas.IsHandleCreated || abas.SelectedTab is null) return;
-        if (!_abasPorPagina.TryGetValue(abas.SelectedTab, out var aba)) return;
-
-        int cabecalhoAbas = abas.Height - abas.DisplayRectangle.Height;
-        int altura = aba.AlturaPreferida + cabecalhoAbas;
-        if (ClientSize.Height != altura) ClientSize = new Size(ClientSize.Width, altura);
+        if (!IsHandleCreated || _abaAtual is not IAbaUtilitario aba) return;
+        int altura = aba.AlturaPreferida;
+        if (altura > 0 && ClientSize.Height != altura) ClientSize = new Size(ClientSize.Width, altura);
     }
 
     // ---------------- Bandeja do sistema ----------------

@@ -184,13 +184,33 @@ public class AbaRede : UserControl, IAbaUtilitario
             .Where(ni => ni.OperationalStatus == OperationalStatus.Up
                       && ni.NetworkInterfaceType != NetworkInterfaceType.Loopback
                       && ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
-            .OrderByDescending(ni => ni.Speed)
+            // A conexão real com a internet primeiro: com gateway padrão e não virtual
+            // (ex.: "vEthernet (Default Switch)" do Hyper-V vai para o fim da lista)
+            .OrderByDescending(TemGateway)
+            .ThenBy(EhVirtual)
+            .ThenByDescending(ni => ni.Speed)
             .ToArray();
 
         cbInterface.Items.Clear();
         foreach (var ni in _interfaces) cbInterface.Items.Add(ni.Name);
         if (cbInterface.Items.Count > 0) cbInterface.SelectedIndex = 0;
     }
+
+    static bool TemGateway(NetworkInterface ni)
+    {
+        try
+        {
+            return ni.GetIPProperties().GatewayAddresses
+                .Any(g => g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+                          && !g.Address.Equals(System.Net.IPAddress.Any));
+        }
+        catch { return false; }
+    }
+
+    static bool EhVirtual(NetworkInterface ni) =>
+        ni.Description.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase)
+        || ni.Description.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
+        || ni.Name.StartsWith("vEthernet", StringComparison.OrdinalIgnoreCase);
 
     void ReiniciarAmostragemSelecionada()
     {
