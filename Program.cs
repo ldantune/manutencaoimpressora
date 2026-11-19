@@ -23,6 +23,7 @@ static class Program
         string arquivoConfig = Path.Combine(pastaDados, "config.json");
         var log = new HistoricoLog(Path.Combine(pastaDados, "historico.db"));
         var agendador = new AgendadorTarefa(NomeTarefa, pastaDados);
+        var historicoRede = new HistoricoRede(Path.Combine(pastaDados, "uso_rede.db"));
 
         if (args.Any(a => a.Equals("/imprimir", StringComparison.OrdinalIgnoreCase)))
         {
@@ -41,7 +42,7 @@ static class Program
         }
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new FormPrincipal(arquivoConfig, log, agendador));
+        Application.Run(new FormPrincipal(arquivoConfig, log, agendador, historicoRede));
         return 0;
     }
 }

@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ManutencaoImpressora</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
     <ApplicationIcon>icone.ico</ApplicationIcon>
   </PropertyGroup>
 

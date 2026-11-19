@@ -1,14 +1,20 @@
 using System.Net.NetworkInformation;
+using ManutencaoImpressora.Services;
 using ManutencaoImpressora.Views.Fluent;
 
 namespace ManutencaoImpressora.Views.Abas;
 
 // ---------------------------------------------------------------
-//  Aba "Rede": uso de internet em tempo real (download/upload),
-//  sem depender de programas de terceiro como o NetWorx
+//  Aba "Rede": uso de internet em tempo real (download/upload) e
+//  totais de hoje / últimos 7 dias / mês atual, sem depender de
+//  programas de terceiro como o NetWorx
 // ---------------------------------------------------------------
 public class AbaRede : UserControl, IAbaUtilitario
 {
+    const int SegundosPorFlush = 30;
+
+    readonly HistoricoRede _historicoRede;
+
     readonly TableLayoutPanel conteudo = new()
     {
         Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -18,21 +24,26 @@ public class AbaRede : UserControl, IAbaUtilitario
     readonly ComboBox cbInterface = new() { DropDownStyle = ComboBoxStyle.DropDownList, Anchor = AnchorStyles.Left | AnchorStyles.Right };
     readonly Label lblDownload = new() { Text = "↓ —", Font = Tema.Titulo, AutoSize = true };
     readonly Label lblUpload = new() { Text = "↑ —", Font = Tema.Titulo, AutoSize = true };
-    readonly Label lblTotalDownload = new() { AutoSize = true, ForeColor = Tema.TextoSecundario };
-    readonly Label lblTotalUpload = new() { AutoSize = true, ForeColor = Tema.TextoSecundario };
     readonly GraficoLinha graficoDownload = new() { Height = 110, Dock = DockStyle.Fill, CorLinha = Tema.Destaque };
     readonly GraficoLinha graficoUpload = new() { Height = 110, Dock = DockStyle.Fill, CorLinha = Color.FromArgb(15, 123, 15) };
+    readonly Label lblUsoHoje = new() { AutoSize = true };
+    readonly Label lblUsoSemana = new() { AutoSize = true };
+    readonly Label lblUsoMes = new() { AutoSize = true };
     readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
 
     NetworkInterface[] _interfaces = Array.Empty<NetworkInterface>();
-    long _bytesRecebidosAnterior, _bytesEnviadosAnterior;
-    bool _primeiraAmostra = true;
+    readonly Dictionary<string, (long Recebidos, long Enviados)> _anterioresPorInterface = new();
+    long _pendenteRecebidos, _pendenteEnviados;
+    int _segundosDesdeUltimoFlush;
+    bool _primeiraAmostraSelecionada = true;
 
     public int AlturaPreferida => conteudo.Height;
     public event EventHandler? AlturaMudou;
 
-    public AbaRede()
+    public AbaRede(HistoricoRede historicoRede)
     {
+        _historicoRede = historicoRede;
+
         SuspendLayout();
         Dock = DockStyle.Fill;
         BackColor = Tema.Fundo;
@@ -49,13 +60,15 @@ public class AbaRede : UserControl, IAbaUtilitario
         });
         AdicionarConteudo(MontarCardInterface());
         AdicionarConteudo(MontarCardTrafego());
+        AdicionarConteudo(MontarCardUso());
 
         Controls.Add(conteudo);
 
         CarregarInterfaces();
-        cbInterface.SelectedIndexChanged += (s, e) => ReiniciarAmostragem();
+        cbInterface.SelectedIndexChanged += (s, e) => ReiniciarAmostragemSelecionada();
         _timer.Tick += (s, e) => AtualizarAmostra();
         _timer.Start();
+        AtualizarResumoUso();
 
         ResumeLayout(false);
         PerformLayout();
@@ -64,7 +77,11 @@ public class AbaRede : UserControl, IAbaUtilitario
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _timer.Dispose();
+        if (disposing)
+        {
+            _timer.Dispose();
+            Descarregar();
+        }
         base.Dispose(disposing);
     }
 
@@ -106,12 +123,11 @@ public class AbaRede : UserControl, IAbaUtilitario
         linhaDownload.Controls.Add(lblDownload, 0, 0);
         linhaDownload.Controls.Add(graficoDownload, 0, 1);
         card.AdicionarLinha(linhaDownload);
-        card.AdicionarLinha(lblTotalDownload);
 
         var linhaUpload = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 16, 0, 16)
+            ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 0, 0)
         };
         linhaUpload.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         linhaUpload.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
@@ -119,13 +135,43 @@ public class AbaRede : UserControl, IAbaUtilitario
         linhaUpload.Controls.Add(lblUpload, 0, 0);
         linhaUpload.Controls.Add(graficoUpload, 0, 1);
         card.AdicionarLinha(linhaUpload);
-        card.AdicionarLinha(lblTotalUpload);
+
+        return card;
+    }
+
+    CardPanel MontarCardUso()
+    {
+        var card = new CardPanel { Margin = new Padding(0) };
+        card.AdicionarLinha(TituloCard("Uso de dados"));
+
+        var grade = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2, RowCount = 3, Margin = new Padding(0, 0, 0, 8)
+        };
+        grade.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        grade.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (int i = 0; i < 3; i++) grade.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        void AdicionarLinhaUso(Label rotulo, Label valor, int linha)
+        {
+            rotulo.ForeColor = Tema.TextoSecundario;
+            rotulo.Margin = new Padding(0, 0, 16, linha == 2 ? 0 : 8);
+            valor.Margin = new Padding(0, 0, 0, linha == 2 ? 0 : 8);
+            grade.Controls.Add(rotulo, 0, linha);
+            grade.Controls.Add(valor, 1, linha);
+        }
+
+        AdicionarLinhaUso(new Label { Text = "Hoje", AutoSize = true }, lblUsoHoje, 0);
+        AdicionarLinhaUso(new Label { Text = "Últimos 7 dias", AutoSize = true }, lblUsoSemana, 1);
+        AdicionarLinhaUso(new Label { Text = "Este mês", AutoSize = true }, lblUsoMes, 2);
+        card.AdicionarLinha(grade);
 
         card.AdicionarLinha(new Label
         {
-            Text = "Os totais são desde a última vez que a conexão foi reiniciada (não desde que este programa abriu).",
+            Text = "Contado enquanto este programa estiver aberto (ele continua rodando na bandeja do sistema).",
             Font = Tema.Legenda, ForeColor = Tema.TextoSecundario, AutoSize = true,
-            MaximumSize = new Size(440, 0), Margin = new Padding(0, 4, 0, 0)
+            MaximumSize = new Size(440, 0), Margin = new Padding(0, 2, 0, 0)
         });
         return card;
     }
@@ -146,43 +192,85 @@ public class AbaRede : UserControl, IAbaUtilitario
         if (cbInterface.Items.Count > 0) cbInterface.SelectedIndex = 0;
     }
 
-    void ReiniciarAmostragem()
+    void ReiniciarAmostragemSelecionada()
     {
-        _primeiraAmostra = true;
+        _primeiraAmostraSelecionada = true;
         graficoDownload.Limpar();
         graficoUpload.Limpar();
         lblDownload.Text = "↓ —";
         lblUpload.Text = "↑ —";
     }
 
+    // A cada segundo: mede todas as interfaces ativas (para contar o uso
+    // total certo), mas só mostra o gráfico/velocidade da selecionada
     void AtualizarAmostra()
     {
-        int indice = cbInterface.SelectedIndex;
-        if (indice < 0 || indice >= _interfaces.Length) return;
+        int indiceSelecionado = cbInterface.SelectedIndex;
+        long totalRecebidosTick = 0, totalEnviadosTick = 0;
 
-        IPv4InterfaceStatistics estatisticas;
-        try { estatisticas = _interfaces[indice].GetIPv4Statistics(); }
-        catch { return; }
-
-        long recebidos = estatisticas.BytesReceived;
-        long enviados = estatisticas.BytesSent;
-
-        if (!_primeiraAmostra)
+        for (int i = 0; i < _interfaces.Length; i++)
         {
-            double down = Math.Max(0, recebidos - _bytesRecebidosAnterior);
-            double up = Math.Max(0, enviados - _bytesEnviadosAnterior);
-            lblDownload.Text = "↓ " + FormatarTaxa(down);
-            lblUpload.Text = "↑ " + FormatarTaxa(up);
-            graficoDownload.AdicionarAmostra(down);
-            graficoUpload.AdicionarAmostra(up);
-        }
-        _primeiraAmostra = false;
-        _bytesRecebidosAnterior = recebidos;
-        _bytesEnviadosAnterior = enviados;
+            var ni = _interfaces[i];
+            IPv4InterfaceStatistics estatisticas;
+            try { estatisticas = ni.GetIPv4Statistics(); }
+            catch { continue; }
 
-        lblTotalDownload.Text = "Total recebido: " + FormatarBytes(recebidos);
-        lblTotalUpload.Text = "Total enviado: " + FormatarBytes(enviados);
+            long recebidos = estatisticas.BytesReceived;
+            long enviados = estatisticas.BytesSent;
+
+            if (_anterioresPorInterface.TryGetValue(ni.Id, out var anterior))
+            {
+                long down = Math.Max(0, recebidos - anterior.Recebidos);
+                long up = Math.Max(0, enviados - anterior.Enviados);
+                totalRecebidosTick += down;
+                totalEnviadosTick += up;
+
+                if (i == indiceSelecionado && !_primeiraAmostraSelecionada)
+                {
+                    lblDownload.Text = "↓ " + FormatarTaxa(down);
+                    lblUpload.Text = "↑ " + FormatarTaxa(up);
+                    graficoDownload.AdicionarAmostra(down);
+                    graficoUpload.AdicionarAmostra(up);
+                }
+                if (i == indiceSelecionado) _primeiraAmostraSelecionada = false;
+            }
+
+            _anterioresPorInterface[ni.Id] = (recebidos, enviados);
+        }
+
+        _pendenteRecebidos += totalRecebidosTick;
+        _pendenteEnviados += totalEnviadosTick;
+        if (++_segundosDesdeUltimoFlush >= SegundosPorFlush)
+        {
+            Descarregar();
+            AtualizarResumoUso();
+        }
     }
+
+    // Grava no banco o que foi acumulado desde o último flush
+    void Descarregar()
+    {
+        if (_pendenteRecebidos > 0 || _pendenteEnviados > 0)
+            _historicoRede.Acumular(DateTime.Today, _pendenteRecebidos, _pendenteEnviados);
+        _pendenteRecebidos = 0;
+        _pendenteEnviados = 0;
+        _segundosDesdeUltimoFlush = 0;
+    }
+
+    void AtualizarResumoUso()
+    {
+        var hoje = _historicoRede.TotalHoje();
+        var semana = _historicoRede.TotalUltimos7Dias();
+        var mes = _historicoRede.TotalMesAtual();
+
+        // Inclui o que ainda não foi gravado, para o número não "atrasar"
+        lblUsoHoje.Text = FormatarUso(hoje.Recebidos + _pendenteRecebidos, hoje.Enviados + _pendenteEnviados);
+        lblUsoSemana.Text = FormatarUso(semana.Recebidos + _pendenteRecebidos, semana.Enviados + _pendenteEnviados);
+        lblUsoMes.Text = FormatarUso(mes.Recebidos + _pendenteRecebidos, mes.Enviados + _pendenteEnviados);
+    }
+
+    static string FormatarUso(long recebidos, long enviados) =>
+        $"↓ {FormatarBytes(recebidos)}   ↑ {FormatarBytes(enviados)}";
 
     static string FormatarTaxa(double bytesPorSegundo)
     {

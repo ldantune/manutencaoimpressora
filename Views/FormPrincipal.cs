@@ -16,14 +16,15 @@ public class FormPrincipal : Form
 
     readonly TabControl abas = new() { Dock = DockStyle.Fill };
     readonly AbaImpressora abaImpressora;
-    readonly AbaRede abaRede = new();
+    readonly AbaRede abaRede;
     readonly NotifyIcon trayIcon = new() { Text = NomeApp };
     readonly Dictionary<TabPage, IAbaUtilitario> _abasPorPagina = new();
     bool _saindoDeVerdade;
 
-    public FormPrincipal(string arquivoConfig, HistoricoLog log, AgendadorTarefa agendador)
+    public FormPrincipal(string arquivoConfig, HistoricoLog log, AgendadorTarefa agendador, HistoricoRede historicoRede)
     {
         abaImpressora = new AbaImpressora(arquivoConfig, log, agendador);
+        abaRede = new AbaRede(historicoRede);
 
         SuspendLayout();
         AutoScaleDimensions = new SizeF(96F, 96F);
