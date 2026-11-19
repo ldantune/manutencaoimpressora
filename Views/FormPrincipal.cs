@@ -2,34 +2,49 @@ using System.Diagnostics;
 using System.Drawing.Printing;
 using ManutencaoImpressora.Models;
 using ManutencaoImpressora.Services;
+using ManutencaoImpressora.Views.Fluent;
 
 namespace ManutencaoImpressora.Views;
 
 // ---------------------------------------------------------------
-//  Tela de configuração
+//  Tela de configuração (visual Windows 11)
 // ---------------------------------------------------------------
 public class FormPrincipal : Form
 {
     static readonly string[] NomesDias = { "Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb" };
+    static readonly string[] NomesDiasCompletos =
+        { "Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado" };
+    static readonly string[] NomesDiasPlural =
+        { "domingos", "segundas", "terças", "quartas", "quintas", "sextas", "sábados" };
 
     readonly string _arquivoConfig;
     readonly HistoricoLog _log;
     readonly AgendadorTarefa _agendador;
+    readonly ToolTip _dicas = new();
 
-    readonly ComboBox cbImpressora = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300 };
-    readonly TextBox txtDocumento = new() { ReadOnly = true, Width = 270 };
-    readonly FlowLayoutPanel pnlDiasLinha1 = new()
-        { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, FlowDirection = FlowDirection.LeftToRight };
-    readonly FlowLayoutPanel pnlDiasLinha2 = new()
-        { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, FlowDirection = FlowDirection.LeftToRight };
-    readonly CheckBox[] chkDias = new CheckBox[7];
-    readonly NumericUpDown numIntervalo = new() { Minimum = 1, Maximum = 52, Width = 55 };
+    readonly TableLayoutPanel conteudo = new()
+    {
+        Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        ColumnCount = 1, Padding = new Padding(24, 12, 24, 8)
+    };
+    readonly Panel rodape = new() { Dock = DockStyle.Bottom, Height = 64, BackColor = Color.White };
+
+    readonly BarraStatus barraStatus = new() { Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly ComboBox cbImpressora = new() { DropDownStyle = ComboBoxStyle.DropDownList, Anchor = AnchorStyles.Left | AnchorStyles.Right };
+    readonly TextBox txtDocumento = new()
+    {
+        ReadOnly = true, Anchor = AnchorStyles.Left | AnchorStyles.Right,
+        PlaceholderText = "Página colorida padrão", BackColor = Color.FromArgb(250, 250, 250)
+    };
+    readonly BotaoDia[] chkDias = new BotaoDia[7];
+    readonly NumericUpDown numIntervalo = new() { Minimum = 1, Maximum = 52, Width = 64, TextAlign = HorizontalAlignment.Center };
+    readonly Label lblSemanas = new() { Text = "semana", AutoSize = true, Margin = new Padding(8, 5, 0, 0) };
     readonly DateTimePicker dtHora = new()
-        { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true, Width = 80 };
-    readonly DateTimePicker dtInicio = new() { Format = DateTimePickerFormat.Short, Width = 130 };
-    readonly CheckBox chkFim = new() { Text = "Terminar em:", AutoSize = true };
-    readonly DateTimePicker dtFim = new() { Format = DateTimePickerFormat.Short, Width = 130 };
-    readonly Label lblStatus = new() { AutoSize = false, Size = new Size(450, 48) };
+        { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true, Dock = DockStyle.Fill };
+    readonly DateTimePicker dtInicio = new() { Format = DateTimePickerFormat.Short, Dock = DockStyle.Fill };
+    readonly Interruptor chkFim = new() { AccessibleName = "Definir data de término", Anchor = AnchorStyles.Right };
+    readonly DateTimePicker dtFim = new() { Format = DateTimePickerFormat.Short, Dock = DockStyle.Fill, AccessibleName = "Data de término" };
+    readonly CaixaResumo resumo = new() { Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
 
     public FormPrincipal(string arquivoConfig, HistoricoLog log, AgendadorTarefa agendador)
     {
@@ -37,85 +52,227 @@ public class FormPrincipal : Form
         _log = log;
         _agendador = agendador;
 
+        SuspendLayout();
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         var versao = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
         Text = $"Manutenção da Impressora - v{versao?.Major}.{versao?.Minor}.{versao?.Build}";
-        Font = new Font("Segoe UI", 9.5f);
-        AutoScaleMode = AutoScaleMode.Font;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        Font = Tema.Corpo;
+        ForeColor = Tema.Texto;
+        BackColor = Tema.Fundo;
+        FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(480, 496);
+        ClientSize = new Size(520, 760);
 
-        // Impressora
-        Add(new Label { Text = "Impressora:", AutoSize = true }, 15, 15);
-        Add(cbImpressora, 15, 38);
-        var btnTeste = new Button { Text = "Imprimir teste", Size = new Size(105, 30) };
-        btnTeste.Click += (s, e) => ImprimirTeste();
-        Add(btnTeste, 360, 36);
-
-        // Documento padrão (opcional): se vazio, imprime a página colorida de sempre
-        Add(new Label { Text = "Documento padrão (opcional):", AutoSize = true }, 15, 82);
-        Add(txtDocumento, 15, 105);
-        var btnEscolher = new Button { Text = "Escolher...", Size = new Size(90, 28) };
-        var btnLimpar = new Button { Text = "Limpar", Size = new Size(70, 28) };
-        btnEscolher.Click += (s, e) => EscolherDocumento();
-        btnLimpar.Click += (s, e) => txtDocumento.Text = "";
-        Add(btnEscolher, 292, 104);
-        Add(btnLimpar, 388, 104);
-
-        // Dias da semana: 4 na primeira linha, 3 na segunda, ambas centralizadas
-        Add(new Label { Text = "Dias da semana:", AutoSize = true }, 15, 140);
-        for (int i = 0; i < 7; i++)
+        conteudo.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        AdicionarConteudo(new Label
         {
-            chkDias[i] = new CheckBox { Text = NomesDias[i], AutoSize = true, Margin = new Padding(0, 0, 14, 0) };
-            (i < 4 ? pnlDiasLinha1 : pnlDiasLinha2).Controls.Add(chkDias[i]);
-        }
-        Add(pnlDiasLinha1, 0, 163);
-        Add(pnlDiasLinha2, 0, 191);
-        pnlDiasLinha1.PerformLayout();
-        pnlDiasLinha2.PerformLayout();
-        pnlDiasLinha1.Left = (ClientSize.Width - pnlDiasLinha1.Width) / 2;
-        pnlDiasLinha2.Left = (ClientSize.Width - pnlDiasLinha2.Width) / 2;
+            Text = "Manutenção da impressora", Font = Tema.Titulo, AutoSize = true, Margin = new Padding(0, 0, 0, 2)
+        });
+        AdicionarConteudo(new Label
+        {
+            Text = "Imprime uma página colorida de tempos em tempos para a tinta não secar nos cabeçotes.",
+            ForeColor = Tema.TextoSecundario, AutoSize = true, MaximumSize = new Size(470, 0), Margin = new Padding(0, 0, 0, 14)
+        });
+        AdicionarConteudo(barraStatus);
+        AdicionarConteudo(MontarCardImpressora());
+        AdicionarConteudo(MontarCardAgendamento());
 
-        // Frequência, horário, início e fim
-        Add(new Label { Text = "Repetir a cada", AutoSize = true }, 15, 236);
-        Add(numIntervalo, 130, 233);
-        Add(new Label { Text = "semana(s)", AutoSize = true }, 190, 236);
+        MontarRodape();
 
-        Add(new Label { Text = "Horário:", AutoSize = true }, 15, 273);
-        Add(dtHora, 130, 270);
-
-        Add(new Label { Text = "Começar em:", AutoSize = true }, 15, 310);
-        Add(dtInicio, 130, 307);
-
-        chkFim.CheckedChanged += (s, e) => dtFim.Enabled = chkFim.Checked;
-        Add(chkFim, 15, 346);
-        Add(dtFim, 130, 344);
-
-        // Status
-        Add(lblStatus, 15, 386);
-
-        // Botões
-        var btnSalvar = new Button { Text = "Salvar e ativar", Size = new Size(140, 34) };
-        var btnDesativar = new Button { Text = "Desativar", Size = new Size(120, 34) };
-        var btnHistorico = new Button { Text = "Ver histórico", Size = new Size(130, 34) };
-        btnSalvar.Click += (s, e) => SalvarEAtivar();
-        btnDesativar.Click += (s, e) => Desativar();
-        btnHistorico.Click += (s, e) => AbrirHistorico();
-        Add(btnSalvar, 15, 446);
-        Add(btnDesativar, 162, 446);
-        Add(btnHistorico, 297, 446);
-        AcceptButton = btnSalvar;
+        Controls.Add(conteudo);
+        Controls.Add(rodape);
 
         CarregarTela();
+        ResumeLayout(false);
+        PerformLayout();
+
+        // A altura da janela acompanha o conteúdo
+        conteudo.SizeChanged += (s, e) => AjustarAltura();
+        Load += (s, e) => AjustarAltura();
         Load += async (s, e) => await VerificarAtualizacaoAsync();
     }
 
-    void Add(Control c, int x, int y)
+    protected override void OnHandleCreated(EventArgs e)
     {
-        c.Location = new Point(x, y);
-        Controls.Add(c);
+        base.OnHandleCreated(e);
+        Tema.AplicarBarraTitulo(this);
     }
+
+    void AjustarAltura() => ClientSize = new Size(ClientSize.Width, conteudo.Height + rodape.Height);
+
+    // ---------------- Montagem da tela ----------------
+
+    void AdicionarConteudo(Control c)
+    {
+        if (c is CardPanel) c.Dock = DockStyle.Fill;
+        conteudo.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        conteudo.RowCount = conteudo.RowStyles.Count;
+        conteudo.Controls.Add(c, 0, conteudo.RowCount - 1);
+    }
+
+    static Label Rotulo(string texto, int margemInferior = 6) =>
+        new() { Text = texto, AutoSize = true, Margin = new Padding(0, 0, 0, margemInferior) };
+
+    static Label TituloCard(string texto) =>
+        new() { Text = texto, Font = Tema.Subtitulo, AutoSize = true, Margin = new Padding(0, 0, 0, 12) };
+
+    static TableLayoutPanel Linha(params (Control controle, bool expande)[] itens)
+    {
+        var t = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = itens.Length, RowCount = 1, Margin = new Padding(0)
+        };
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (int i = 0; i < itens.Length; i++)
+        {
+            t.ColumnStyles.Add(itens[i].expande ? new ColumnStyle(SizeType.Percent, 100) : new ColumnStyle(SizeType.AutoSize));
+            itens[i].controle.Margin = new Padding(i == 0 ? 0 : 8, 0, 0, 0);
+            if (itens[i].controle.Anchor == (AnchorStyles.Top | AnchorStyles.Left))
+                itens[i].controle.Anchor = AnchorStyles.Left;
+            t.Controls.Add(itens[i].controle, i, 0);
+        }
+        return t;
+    }
+
+    CardPanel MontarCardImpressora()
+    {
+        var card = new CardPanel();
+        card.AdicionarLinha(TituloCard("Impressora"));
+
+        var btnTeste = new BotaoFluent { Text = "Imprimir agora", Icone = Icones.Imprimir };
+        btnTeste.Click += (s, e) => ImprimirTeste();
+        _dicas.SetToolTip(btnTeste, "Imprime uma página agora para testar");
+        var linhaImpressora = Linha((cbImpressora, true), (btnTeste, false));
+        linhaImpressora.Margin = new Padding(0, 0, 0, 14);
+        card.AdicionarLinha(linhaImpressora);
+
+        // Documento padrão (opcional): se vazio, imprime a página colorida de sempre
+        var rotuloDoc = Rotulo("Documento padrão (opcional)");
+        card.AdicionarLinha(rotuloDoc);
+        var btnEscolher = new BotaoFluent { Text = "Escolher…" };
+        var btnLimpar = new BotaoFluent { Icone = Icones.Fechar, AccessibleName = "Limpar documento" };
+        btnEscolher.Click += (s, e) => EscolherDocumento();
+        btnLimpar.Click += (s, e) => txtDocumento.Text = "";
+        _dicas.SetToolTip(btnLimpar, "Voltar para a página colorida padrão");
+        card.AdicionarLinha(Linha((txtDocumento, true), (btnEscolher, false), (btnLimpar, false)));
+
+        card.AdicionarLinha(new Label
+        {
+            Text = "Sem documento, é impressa uma página com faixas de todas as cores.",
+            Font = Tema.Legenda, ForeColor = Tema.TextoSecundario, AutoSize = true, Margin = new Padding(0, 6, 0, 0)
+        });
+        return card;
+    }
+
+    CardPanel MontarCardAgendamento()
+    {
+        var card = new CardPanel { Margin = new Padding(0) };
+        card.AdicionarLinha(TituloCard("Agendamento"));
+
+        // Dias da semana: 7 botões lado a lado
+        card.AdicionarLinha(Rotulo("Dias da semana"));
+        var gradeDias = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 7, RowCount = 1, Margin = new Padding(0, 0, 0, 16)
+        };
+        gradeDias.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (int i = 0; i < 7; i++)
+        {
+            gradeDias.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 7));
+            chkDias[i] = new BotaoDia { Text = NomesDias[i], AccessibleName = NomesDiasCompletos[i] };
+            chkDias[i].CheckedChanged += (s, e) => AtualizarResumo();
+            gradeDias.Controls.Add(chkDias[i], i, 0);
+        }
+        card.AdicionarLinha(gradeDias);
+
+        // Frequência, horário, início e fim em duas colunas
+        var grade = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2, RowCount = 4, Margin = new Padding(0, 0, 0, 12)
+        };
+        grade.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        grade.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        for (int i = 0; i < 4; i++) grade.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var repetir = new FlowLayoutPanel
+        {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false,
+            Margin = new Padding(0, 0, 8, 14)
+        };
+        numIntervalo.Margin = new Padding(0);
+        numIntervalo.AccessibleName = "Repetir a cada quantas semanas";
+        repetir.Controls.Add(numIntervalo);
+        repetir.Controls.Add(lblSemanas);
+
+        var cabecalhoFim = Linha((Rotulo("Terminar em", 0), true), (chkFim, false));
+        cabecalhoFim.Margin = new Padding(8, 0, 0, 2);
+
+        grade.Controls.Add(ComMargem(Rotulo("Repetir a cada"), esquerda: false), 0, 0);
+        grade.Controls.Add(ComMargem(Rotulo("Horário"), esquerda: true), 1, 0);
+        grade.Controls.Add(repetir, 0, 1);
+        grade.Controls.Add(ComMargem(dtHora, esquerda: true, inferior: 14), 1, 1);
+        grade.Controls.Add(ComMargem(Rotulo("Começar em"), esquerda: false, superior: 4), 0, 2);
+        grade.Controls.Add(cabecalhoFim, 1, 2);
+        grade.Controls.Add(ComMargem(dtInicio, esquerda: false), 0, 3);
+        grade.Controls.Add(ComMargem(dtFim, esquerda: true), 1, 3);
+        card.AdicionarLinha(grade);
+
+        numIntervalo.ValueChanged += (s, e) => AtualizarResumo();
+        dtHora.ValueChanged += (s, e) => AtualizarResumo();
+        dtInicio.ValueChanged += (s, e) => AtualizarResumo();
+        dtFim.ValueChanged += (s, e) => AtualizarResumo();
+        chkFim.CheckedChanged += (s, e) => { dtFim.Enabled = chkFim.Checked; AtualizarResumo(); };
+
+        card.AdicionarLinha(resumo);
+        return card;
+    }
+
+    static Control ComMargem(Control c, bool esquerda, int superior = 0, int inferior = 6)
+    {
+        c.Margin = new Padding(esquerda ? 8 : 0, superior, esquerda ? 0 : 8, inferior);
+        return c;
+    }
+
+    void MontarRodape()
+    {
+        rodape.Paint += (s, e) =>
+        {
+            using var pen = new Pen(Tema.BordaCard);
+            e.Graphics.DrawLine(pen, 0, 0, rodape.Width, 0);
+        };
+
+        var btnHistorico = new BotaoFluent { Text = "Histórico", Icone = Icones.Historico, Estilo = EstiloBotao.Sutil };
+        var btnDesativar = new BotaoFluent { Text = "Desativar" };
+        var btnSalvar = new BotaoFluent { Text = "Salvar e ativar", Estilo = EstiloBotao.Primario };
+        btnSalvar.Click += (s, e) => SalvarEAtivar();
+        btnDesativar.Click += (s, e) => Desativar();
+        btnHistorico.Click += (s, e) => AbrirHistorico();
+        AcceptButton = btnSalvar;
+
+        var barra = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Padding = new Padding(16, 0, 24, 0)
+        };
+        barra.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        barra.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        barra.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        barra.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        barra.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        foreach (var b in new[] { btnHistorico, btnDesativar, btnSalvar }) b.Anchor = AnchorStyles.None;
+        btnDesativar.Margin = new Padding(0, 0, 8, 0);
+        barra.Controls.Add(btnHistorico, 0, 0);
+        barra.Controls.Add(btnDesativar, 2, 0);
+        barra.Controls.Add(btnSalvar, 3, 0);
+        rodape.Controls.Add(barra);
+    }
+
+    // ---------------- Dados ----------------
 
     void CarregarTela()
     {
@@ -142,6 +299,7 @@ public class FormPrincipal : Form
         dtFim.Enabled = cfg.TemFim;
 
         AtualizarStatus(cfg);
+        AtualizarResumo();
     }
 
     Config LerTela() => new()
@@ -156,27 +314,48 @@ public class FormPrincipal : Form
         Fim = dtFim.Value.Date
     };
 
+    // Frase que descreve o agendamento, atualizada a cada alteração
+    void AtualizarResumo()
+    {
+        // Evita rodar enquanto a tela ainda está sendo montada
+        if (chkDias.Any(c => c is null)) return;
+
+        var cfg = LerTela();
+        lblSemanas.Text = cfg.IntervaloSemanas == 1 ? "semana" : "semanas";
+
+        if (cfg.Dias.Count == 0)
+        {
+            resumo.Text = "Marque pelo menos um dia da semana.";
+            return;
+        }
+
+        var nomes = cfg.Dias.OrderBy(d => (int)d).Select(d => NomesDiasPlural[(int)d]).ToList();
+        string dias = nomes.Count == 1 ? nomes[0] : string.Join(", ", nomes.Take(nomes.Count - 1)) + " e " + nomes[^1];
+        string frequencia = cfg.IntervaloSemanas == 1 ? "Toda semana" : $"A cada {cfg.IntervaloSemanas} semanas";
+        string inicio = cfg.Inicio.Date > DateTime.Today ? $", a partir de {cfg.Inicio:dd/MM/yyyy}" : "";
+        string fim = cfg.TemFim ? $", até {cfg.Fim:dd/MM/yyyy}" : ", sem data de término";
+        resumo.Text = $"{frequencia}: {dias}, às {cfg.Hora:hh\\:mm}{inicio}{fim}.";
+    }
+
     void AtualizarStatus(Config cfg)
     {
         if (!_agendador.Existe())
         {
-            lblStatus.ForeColor = Color.DimGray;
-            lblStatus.Text = "Impressão automática desativada.";
+            barraStatus.Definir(Severidade.Neutro, "Impressão automática desativada",
+                "Configure abaixo e clique em Salvar e ativar.");
             return;
         }
 
         var proxima = cfg.ProximaExecucao();
         if (proxima is null)
-        {
-            lblStatus.ForeColor = Color.DarkOrange;
-            lblStatus.Text = "Agendamento ativo, mas a data de término já passou. Altere as datas e salve de novo.";
-        }
+            barraStatus.Definir(Severidade.Aviso, "A data de término já passou",
+                "O agendamento está ativo, mas não vai imprimir. Altere as datas e salve de novo.");
         else
-        {
-            lblStatus.ForeColor = Color.DarkGreen;
-            lblStatus.Text = $"Ativo. Próxima impressão: {proxima:dddd, dd/MM/yyyy} às {proxima:HH:mm}.";
-        }
+            barraStatus.Definir(Severidade.Sucesso, "Agendamento ativo",
+                $"Próxima impressão: {proxima:dddd, dd/MM/yyyy} às {proxima:HH:mm}");
     }
+
+    // ---------------- Ações ----------------
 
     void SalvarEAtivar()
     {
@@ -273,11 +452,7 @@ public class FormPrincipal : Form
 
     void AbrirHistorico()
     {
-        if (!File.Exists(_log.Arquivo))
-        {
-            MessageBox.Show("Ainda não há nada no histórico.", Text);
-            return;
-        }
-        Process.Start(new ProcessStartInfo(_log.Arquivo) { UseShellExecute = true });
+        using var tela = new FormHistorico(_log);
+        tela.ShowDialog(this);
     }
 }

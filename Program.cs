@@ -21,7 +21,7 @@ static class Program
         Directory.CreateDirectory(pastaDados);
 
         string arquivoConfig = Path.Combine(pastaDados, "config.json");
-        var log = new HistoricoLog(Path.Combine(pastaDados, "historico.txt"));
+        var log = new HistoricoLog(Path.Combine(pastaDados, "historico.db"));
         var agendador = new AgendadorTarefa(NomeTarefa, pastaDados);
 
         if (args.Any(a => a.Equals("/imprimir", StringComparison.OrdinalIgnoreCase)))
