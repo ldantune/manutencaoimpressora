@@ -4,7 +4,7 @@
 ; agendamento automático (se houver) ao desinstalar.
 
 #define MyAppName "Manutenção da Impressora"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppExeName "ManutencaoImpressora.exe"
 
 [Setup]
@@ -13,6 +13,7 @@ AppVersion={#MyAppVersion}
 DefaultDirName={autopf}\ManutencaoImpressora
 DefaultGroupName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=icone.ico
 OutputDir=instalador
 OutputBaseFilename=ManutencaoImpressora_Instalador
 Compression=lzma

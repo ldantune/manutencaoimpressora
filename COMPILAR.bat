@@ -1,6 +1,6 @@
 @echo off
 echo Gerando o executavel...
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publicado
+dotnet publish -c Release -r win-x64 --self-contained true -o publicado
 if errorlevel 1 goto fim
 
 echo.

@@ -90,6 +90,15 @@ static class Tema
         g.DrawPath(pen, path);
     }
 
+    // Ícone do programa (o mesmo embutido no .exe), usado nas janelas
+    public static Icon? IconePrograma { get; } = CarregarIcone();
+
+    static Icon? CarregarIcone()
+    {
+        try { return Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+        catch { return null; }
+    }
+
     // Deixa a barra de título da mesma cor do fundo (Windows 11; ignorado no Windows 10)
     public static void AplicarBarraTitulo(Form form)
     {

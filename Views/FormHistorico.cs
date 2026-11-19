@@ -57,6 +57,7 @@ public class FormHistorico : Form
         Font = Tema.Corpo;
         ForeColor = Tema.Texto;
         BackColor = Tema.Fundo;
+        Icon = Tema.IconePrograma ?? Icon;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = false;
