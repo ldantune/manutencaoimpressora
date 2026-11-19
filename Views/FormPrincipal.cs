@@ -16,7 +16,9 @@ public class FormPrincipal : Form
 
     readonly TabControl abas = new() { Dock = DockStyle.Fill };
     readonly AbaImpressora abaImpressora;
+    readonly AbaRede abaRede = new();
     readonly NotifyIcon trayIcon = new() { Text = NomeApp };
+    readonly Dictionary<TabPage, IAbaUtilitario> _abasPorPagina = new();
     bool _saindoDeVerdade;
 
     public FormPrincipal(string arquivoConfig, HistoricoLog log, AgendadorTarefa agendador)
@@ -38,9 +40,8 @@ public class FormPrincipal : Form
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(520, 760);
 
-        var pagImpressora = new TabPage("Impressora") { BackColor = Tema.Fundo, Padding = new Padding(0) };
-        pagImpressora.Controls.Add(abaImpressora);
-        abas.Controls.Add(pagImpressora);
+        AdicionarAba("Impressora", abaImpressora);
+        AdicionarAba("Rede", abaRede);
         Controls.Add(abas);
 
         ConfigurarBandeja();
@@ -50,8 +51,6 @@ public class FormPrincipal : Form
         ResumeLayout(false);
         PerformLayout();
 
-        // A altura da janela acompanha o conteúdo da aba selecionada
-        abaImpressora.AlturaMudou += (s, e) => AjustarAltura();
         abas.SelectedIndexChanged += (s, e) => AjustarAltura();
         Load += (s, e) => AjustarAltura();
         Load += async (s, e) => await VerificarAtualizacaoAsync();
@@ -64,13 +63,27 @@ public class FormPrincipal : Form
         Tema.AplicarBarraTitulo(this);
     }
 
-    // A altura preferida depende da ferramenta aberta na aba atual;
-    // por ora só existe a aba de impressora.
+    void AdicionarAba(string titulo, Control controle)
+    {
+        var pagina = new TabPage(titulo) { BackColor = Tema.Fundo, Padding = new Padding(0) };
+        pagina.Controls.Add(controle);
+        abas.TabPages.Add(pagina);
+
+        if (controle is IAbaUtilitario aba)
+        {
+            _abasPorPagina[pagina] = aba;
+            aba.AlturaMudou += (s, e) => AjustarAltura();
+        }
+    }
+
+    // A altura da janela acompanha o conteúdo da aba selecionada
     void AjustarAltura()
     {
-        if (!abas.IsHandleCreated) return;
+        if (!abas.IsHandleCreated || abas.SelectedTab is null) return;
+        if (!_abasPorPagina.TryGetValue(abas.SelectedTab, out var aba)) return;
+
         int cabecalhoAbas = abas.Height - abas.DisplayRectangle.Height;
-        int altura = abaImpressora.AlturaPreferida + cabecalhoAbas;
+        int altura = aba.AlturaPreferida + cabecalhoAbas;
         if (ClientSize.Height != altura) ClientSize = new Size(ClientSize.Width, altura);
     }
 

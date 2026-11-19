@@ -4,7 +4,7 @@
 ; Iniciar, e remove o agendamento automático (se houver) ao desinstalar.
 
 #define MyAppName "L2 Utilitários"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.4.0"
 #define MyAppExeName "ManutencaoImpressora.exe"
 
 [Setup]

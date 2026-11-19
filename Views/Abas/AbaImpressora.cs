@@ -10,7 +10,7 @@ namespace ManutencaoImpressora.Views.Abas;
 //  Aba "Impressora": tudo que antes era a tela única do programa
 //  (configuração do agendamento, impressão de teste, histórico)
 // ---------------------------------------------------------------
-public class AbaImpressora : UserControl
+public class AbaImpressora : UserControl, IAbaUtilitario
 {
     static readonly string[] NomesDias = { "Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb" };
     static readonly string[] NomesDiasCompletos =
