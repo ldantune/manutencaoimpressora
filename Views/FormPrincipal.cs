@@ -45,6 +45,8 @@ public class FormPrincipal : Form
     readonly Interruptor chkFim = new() { AccessibleName = "Definir data de término", Anchor = AnchorStyles.Right };
     readonly DateTimePicker dtFim = new() { Format = DateTimePickerFormat.Short, Dock = DockStyle.Fill, AccessibleName = "Data de término" };
     readonly CaixaResumo resumo = new() { Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly NotifyIcon trayIcon = new() { Text = "Manutenção da Impressora" };
+    bool _saindoDeVerdade;
 
     public FormPrincipal(string arquivoConfig, HistoricoLog log, AgendadorTarefa agendador)
     {
@@ -86,6 +88,12 @@ public class FormPrincipal : Form
         Controls.Add(conteudo);
         Controls.Add(rodape);
 
+        ConfigurarBandeja();
+        cbImpressora.SelectedIndexChanged += (s, e) =>
+        {
+            if (!chkDias.Any(c => c is null)) AtualizarStatus(LerTela());
+        };
+
         CarregarTela();
         ResumeLayout(false);
         PerformLayout();
@@ -94,6 +102,7 @@ public class FormPrincipal : Form
         conteudo.SizeChanged += (s, e) => AjustarAltura();
         Load += (s, e) => AjustarAltura();
         Load += async (s, e) => await VerificarAtualizacaoAsync();
+        Load += (s, e) => VerificarFalhasRecentes();
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -103,6 +112,48 @@ public class FormPrincipal : Form
     }
 
     void AjustarAltura() => ClientSize = new Size(ClientSize.Width, conteudo.Height + rodape.Height);
+
+    // ---------------- Bandeja do sistema ----------------
+
+    void ConfigurarBandeja()
+    {
+        trayIcon.Icon = Tema.IconePrograma ?? Icon;
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Abrir", null, (s, e) => MostrarJanela());
+        menu.Items.Add("Sair", null, (s, e) => { _saindoDeVerdade = true; Close(); });
+        trayIcon.ContextMenuStrip = menu;
+        trayIcon.DoubleClick += (s, e) => MostrarJanela();
+        trayIcon.Visible = true;
+    }
+
+    void MostrarJanela()
+    {
+        Show();
+        WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_saindoDeVerdade && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            Hide();
+            trayIcon.ShowBalloonTip(2000, Text,
+                "O programa continua rodando em segundo plano. Clique no ícone para abrir de novo.",
+                ToolTipIcon.Info);
+            return;
+        }
+
+        trayIcon.Visible = false;
+        base.OnFormClosing(e);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (WindowState == FormWindowState.Minimized) Hide();
+    }
 
     // ---------------- Montagem da tela ----------------
 
@@ -340,20 +391,44 @@ public class FormPrincipal : Form
 
     void AtualizarStatus(Config cfg)
     {
-        if (!_agendador.Existe())
+        bool ativo = _agendador.Existe();
+
+        if (!ativo)
         {
             barraStatus.Definir(Severidade.Neutro, "Impressão automática desativada",
                 "Configure abaixo e clique em Salvar e ativar.");
-            return;
+        }
+        else if (!StatusImpressora.EstaOnline(cfg.Impressora))
+        {
+            barraStatus.Definir(Severidade.Aviso, "Impressora desligada ou desconectada",
+                "O agendamento está ativo, mas a impressão pode falhar até ela voltar a responder.");
+        }
+        else
+        {
+            var proxima = cfg.ProximaExecucao();
+            if (proxima is null)
+                barraStatus.Definir(Severidade.Aviso, "A data de término já passou",
+                    "O agendamento está ativo, mas não vai imprimir. Altere as datas e salve de novo.");
+            else
+                barraStatus.Definir(Severidade.Sucesso, "Agendamento ativo",
+                    $"Próxima impressão: {proxima:dddd, dd/MM/yyyy} às {proxima:HH:mm}");
         }
 
-        var proxima = cfg.ProximaExecucao();
-        if (proxima is null)
-            barraStatus.Definir(Severidade.Aviso, "A data de término já passou",
-                "O agendamento está ativo, mas não vai imprimir. Altere as datas e salve de novo.");
-        else
-            barraStatus.Definir(Severidade.Sucesso, "Agendamento ativo",
-                $"Próxima impressão: {proxima:dddd, dd/MM/yyyy} às {proxima:HH:mm}");
+        trayIcon.Text = ativo ? "Manutenção da Impressora — ativo" : "Manutenção da Impressora — inativo";
+    }
+
+    // Avisa o usuário se as últimas impressões automáticas vêm falhando,
+    // já que o agendamento roda sozinho e ninguém costuma olhar o histórico
+    void VerificarFalhasRecentes()
+    {
+        int falhas = _log.FalhasAutomaticasConsecutivas();
+        if (falhas < 2) return;
+
+        MessageBox.Show(
+            $"As últimas {falhas} impressões automáticas falharam.\n\n" +
+            "Verifique se a impressora está ligada, conectada e com papel/tinta, " +
+            "ou confira o histórico para ver o motivo do erro.",
+            Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
     // ---------------- Ações ----------------

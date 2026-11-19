@@ -76,4 +76,19 @@ public class HistoricoLog
         catch { /* retorna o que conseguiu ler */ }
         return registros;
     }
+
+    // Conta quantas impressões automáticas falharam em sequência,
+    // contando da mais recente para a mais antiga, até achar um
+    // sucesso. Usado para avisar o usuário de falhas persistentes.
+    public int FalhasAutomaticasConsecutivas()
+    {
+        int falhas = 0;
+        foreach (var r in Listar())
+        {
+            if (!r.Mensagem.Contains("automática", StringComparison.OrdinalIgnoreCase)) continue;
+            if (r.Mensagem.StartsWith("ERRO", StringComparison.OrdinalIgnoreCase)) falhas++;
+            else break;
+        }
+        return falhas;
+    }
 }
