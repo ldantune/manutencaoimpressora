@@ -29,6 +29,18 @@ public class AbaRede : UserControl, IAbaUtilitario
     readonly Label lblUsoHoje = new() { AutoSize = true };
     readonly Label lblUsoSemana = new() { AutoSize = true };
     readonly Label lblUsoMes = new() { AutoSize = true };
+    // "Ao vivo" (velocidade e gráficos) e "Relatório" (resumo por período)
+    readonly BotaoPivo pivoAoVivo = new() { Text = "Ao vivo", Checked = true };
+    readonly BotaoPivo pivoRelatorio = new() { Text = "Relatório" };
+    readonly BotaoPivo pivoApps = new() { Text = "Por app" };
+    readonly AppsRede appsRede;
+    readonly FonteUsoRede _fonte;
+    bool _monitorRodando;
+    readonly TableLayoutPanel painelAoVivo = new()
+    {
+        Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Margin = new Padding(0)
+    };
+    readonly RelatorioRede relatorio;
     readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
 
     NetworkInterface[] _interfaces = Array.Empty<NetworkInterface>();
@@ -43,6 +55,10 @@ public class AbaRede : UserControl, IAbaUtilitario
     public AbaRede(HistoricoRede historicoRede)
     {
         _historicoRede = historicoRede;
+        _fonte = new FonteUsoRede(historicoRede, new BancoUsoApps(BancoUsoApps.CaminhoPadrao));
+        _monitorRodando = InstaladorServico.EstaRodando();
+        relatorio = new RelatorioRede(_fonte) { Visible = false };
+        appsRede = new AppsRede(_fonte) { Visible = false };
 
         SuspendLayout();
         Dock = DockStyle.Fill;
@@ -55,12 +71,18 @@ public class AbaRede : UserControl, IAbaUtilitario
         });
         AdicionarConteudo(new Label
         {
-            Text = "Velocidade de download e upload em tempo real, sem precisar de outro programa.",
+            Text = "Velocidade em tempo real e relatório de uso, sem precisar de outro programa.",
             ForeColor = Tema.TextoSecundario, AutoSize = true, MaximumSize = new Size(470, 0), Margin = new Padding(0, 0, 0, 14)
         });
-        AdicionarConteudo(MontarCardInterface());
-        AdicionarConteudo(MontarCardTrafego());
-        AdicionarConteudo(MontarCardUso());
+        AdicionarConteudo(MontarPivo());
+
+        painelAoVivo.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        AdicionarEm(painelAoVivo, MontarCardInterface());
+        AdicionarEm(painelAoVivo, MontarCardTrafego());
+        AdicionarEm(painelAoVivo, MontarCardUso());
+        AdicionarConteudo(painelAoVivo);
+        AdicionarConteudo(relatorio);
+        AdicionarConteudo(appsRede);
 
         Controls.Add(conteudo);
 
@@ -87,12 +109,40 @@ public class AbaRede : UserControl, IAbaUtilitario
 
     // ---------------- Montagem da tela ----------------
 
-    void AdicionarConteudo(Control c)
+    void AdicionarConteudo(Control c) => AdicionarEm(conteudo, c);
+
+    static void AdicionarEm(TableLayoutPanel tabela, Control c)
     {
         if (c is CardPanel) c.Dock = DockStyle.Fill;
-        conteudo.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        conteudo.RowCount = conteudo.RowStyles.Count;
-        conteudo.Controls.Add(c, 0, conteudo.RowCount - 1);
+        tabela.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        tabela.RowCount = tabela.RowStyles.Count;
+        tabela.Controls.Add(c, 0, tabela.RowCount - 1);
+    }
+
+    Control MontarPivo()
+    {
+        var pivo = new FlowLayoutPanel
+        {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false,
+            Margin = new Padding(0, 0, 0, 10)
+        };
+        pivo.Controls.Add(pivoAoVivo);
+        pivo.Controls.Add(pivoRelatorio);
+        pivo.Controls.Add(pivoApps);
+        foreach (var opcao in new[] { pivoAoVivo, pivoRelatorio, pivoApps })
+            opcao.CheckedChanged += (s, e) => { if (((RadioButton)s!).Checked) MostrarVisao(); };
+        return pivo;
+    }
+
+    void MostrarVisao()
+    {
+        SuspendLayout();
+        painelAoVivo.Visible = pivoAoVivo.Checked;
+        relatorio.Visible = pivoRelatorio.Checked;
+        appsRede.Visible = pivoApps.Checked;
+        if (relatorio.Visible) relatorio.Atualizar(PendenteRecebidos, PendenteEnviados);
+        if (appsRede.Visible) appsRede.Atualizar();
+        ResumeLayout(true);
     }
 
     static Label TituloCard(string texto) =>
@@ -115,14 +165,13 @@ public class AbaRede : UserControl, IAbaUtilitario
         var linhaDownload = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 0, 16)
+            ColumnCount = 1, RowCount = 2, Margin = new Padding(0)
         };
         linhaDownload.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         linhaDownload.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
         lblDownload.ForeColor = Tema.Destaque;
         linhaDownload.Controls.Add(lblDownload, 0, 0);
         linhaDownload.Controls.Add(graficoDownload, 0, 1);
-        card.AdicionarLinha(linhaDownload);
 
         var linhaUpload = new TableLayoutPanel
         {
@@ -134,7 +183,10 @@ public class AbaRede : UserControl, IAbaUtilitario
         lblUpload.ForeColor = Color.FromArgb(15, 123, 15);
         linhaUpload.Controls.Add(lblUpload, 0, 0);
         linhaUpload.Controls.Add(graficoUpload, 0, 1);
-        card.AdicionarLinha(linhaUpload);
+        var grade = new GradeAdaptativa { LarguraMinimaColuna = 320, MaximoColunas = 2, Espaco = 16 };
+        grade.Adicionar(linhaDownload);
+        grade.Adicionar(linhaUpload);
+        card.AdicionarLinha(grade);
 
         return card;
     }
@@ -169,7 +221,7 @@ public class AbaRede : UserControl, IAbaUtilitario
 
         card.AdicionarLinha(new Label
         {
-            Text = "Contado enquanto este programa estiver aberto (ele continua rodando na bandeja do sistema).",
+            Text = "Com o monitor de rede ativo, conta o tempo todo; sem ele, só enquanto o programa estiver aberto.",
             Font = Tema.Legenda, ForeColor = Tema.TextoSecundario, AutoSize = true,
             MaximumSize = new Size(440, 0), Margin = new Padding(0, 2, 0, 0)
         });
@@ -264,13 +316,21 @@ public class AbaRede : UserControl, IAbaUtilitario
         {
             Descarregar();
             AtualizarResumoUso();
+            if (relatorio.Visible) relatorio.Atualizar(PendenteRecebidos, PendenteEnviados);
+            if (appsRede.Visible) appsRede.Atualizar();
         }
     }
+
+    // Com o monitor de rede rodando, ele é quem conta (sempre, mesmo com a janela fechada);
+    // a contagem da tela só é gravada quando o monitor está parado, para não contar em dobro
+    long PendenteRecebidos => _monitorRodando ? 0 : _pendenteRecebidos;
+    long PendenteEnviados => _monitorRodando ? 0 : _pendenteEnviados;
 
     // Grava no banco o que foi acumulado desde o último flush
     void Descarregar()
     {
-        if (_pendenteRecebidos > 0 || _pendenteEnviados > 0)
+        _monitorRodando = InstaladorServico.EstaRodando();
+        if (!_monitorRodando && (_pendenteRecebidos > 0 || _pendenteEnviados > 0))
             _historicoRede.Acumular(DateTime.Today, _pendenteRecebidos, _pendenteEnviados);
         _pendenteRecebidos = 0;
         _pendenteEnviados = 0;
@@ -279,14 +339,15 @@ public class AbaRede : UserControl, IAbaUtilitario
 
     void AtualizarResumoUso()
     {
-        var hoje = _historicoRede.TotalHoje();
-        var semana = _historicoRede.TotalUltimos7Dias();
-        var mes = _historicoRede.TotalMesAtual();
+        var hoje = DateTime.Today;
+        var semana = _fonte.TotalEntre(hoje.AddDays(-6), hoje);
+        var mes = _fonte.TotalEntre(new DateTime(hoje.Year, hoje.Month, 1), hoje);
+        var doDia = _fonte.TotalEntre(hoje, hoje);
 
         // Inclui o que ainda não foi gravado, para o número não "atrasar"
-        lblUsoHoje.Text = FormatarUso(hoje.Recebidos + _pendenteRecebidos, hoje.Enviados + _pendenteEnviados);
-        lblUsoSemana.Text = FormatarUso(semana.Recebidos + _pendenteRecebidos, semana.Enviados + _pendenteEnviados);
-        lblUsoMes.Text = FormatarUso(mes.Recebidos + _pendenteRecebidos, mes.Enviados + _pendenteEnviados);
+        lblUsoHoje.Text = FormatarUso(doDia.Recebidos + PendenteRecebidos, doDia.Enviados + PendenteEnviados);
+        lblUsoSemana.Text = FormatarUso(semana.Recebidos + PendenteRecebidos, semana.Enviados + PendenteEnviados);
+        lblUsoMes.Text = FormatarUso(mes.Recebidos + PendenteRecebidos, mes.Enviados + PendenteEnviados);
     }
 
     static string FormatarUso(long recebidos, long enviados) =>

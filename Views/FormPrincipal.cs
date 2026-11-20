@@ -15,11 +15,13 @@ public class FormPrincipal : Form
     const string NomeApp = "L2 Utilitários";
 
     const int LarguraMenu = 200;
-    const int LarguraConteudo = 520;
+    const int LarguraMaximaConteudo = 1200;   // acima disso o conteúdo fica centralizado
 
     // Menu lateral (um item por utilitário) e a área onde a ferramenta aparece
-    readonly Panel menuLateral = new() { Dock = DockStyle.Left, Width = LarguraMenu, Padding = new Padding(8, 8, 4, 8) };
-    readonly Panel areaConteudo = new() { Dock = DockStyle.Fill };
+    readonly PainelSuave menuLateral = new() { Dock = DockStyle.Left, Width = LarguraMenu, Padding = new Padding(8, 8, 4, 8) };
+    readonly PainelSuave areaConteudo = new() { Dock = DockStyle.Fill, AutoScroll = true };
+    FormWindowState _estadoVisivel = FormWindowState.Maximized;
+    bool _posicionando;
     readonly List<(BotaoNavegacao botao, Control aba)> _itens = new();
     Control? _abaAtual;
     readonly AbaImpressora abaImpressora;
@@ -42,10 +44,13 @@ public class FormPrincipal : Form
         ForeColor = Tema.Texto;
         BackColor = Tema.Fundo;
         Icon = Tema.IconePrograma ?? Icon;
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox = false;
+        // Abre maximizada; ao restaurar, fica com um tamanho confortável e pode ser redimensionada
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(LarguraMenu + LarguraConteudo, 760);
+        ClientSize = new Size(LarguraMenu + 980, 800);
+        MinimumSize = new Size(LarguraMenu + 560, 560);
+        WindowState = FormWindowState.Maximized;
 
         AdicionarAba("Rede", Icones.Rede, abaRede);
         AdicionarAba("Impressora", Icones.Imprimir, abaImpressora);
@@ -61,7 +66,10 @@ public class FormPrincipal : Form
         ResumeLayout(false);
         PerformLayout();
 
-        Load += (s, e) => AjustarAltura();
+        areaConteudo.Resize += (s, e) => PosicionarAba();
+        Load += (s, e) => RestaurarEstadoJanela();
+        Load += (s, e) => PosicionarAba();
+        Shown += (s, e) => Invalidate(true);
         Load += async (s, e) => await VerificarAtualizacaoAsync();
         Load += (s, e) => abaImpressora.VerificarFalhasRecentes();
     }
@@ -78,13 +86,13 @@ public class FormPrincipal : Form
         menuLateral.Controls.Add(botao);
         botao.BringToFront();          // mantém os itens na ordem em que foram adicionados
 
-        aba.Dock = DockStyle.Fill;
+        aba.Dock = DockStyle.None;     // posicionada à mão: centralizada e com rolagem
         aba.Visible = false;
         areaConteudo.Controls.Add(aba);
 
         botao.CheckedChanged += (s, e) => { if (botao.Checked) MostrarAba(aba); };
         if (aba is IAbaUtilitario utilitario)
-            utilitario.AlturaMudou += (s, e) => { if (aba == _abaAtual) AjustarAltura(); };
+            utilitario.AlturaMudou += (s, e) => { if (aba == _abaAtual) PosicionarAba(); };
 
         _itens.Add((botao, aba));
     }
@@ -96,23 +104,64 @@ public class FormPrincipal : Form
         if (_abaAtual != null) _abaAtual.Visible = false;
         aba.Visible = true;
         _abaAtual = aba;
+        areaConteudo.AutoScrollPosition = Point.Empty;
         areaConteudo.ResumeLayout(true);
-        AjustarAltura();
+        PosicionarAba();
     }
 
-    // A altura da janela acompanha o conteúdo do utilitário selecionado
-    void AjustarAltura()
+    // Layout adaptativo: o utilitário ocupa a largura disponível (até um limite,
+    // centralizado) e a área rola quando ele é mais alto que a janela
+    void PosicionarAba()
     {
-        if (!IsHandleCreated || _abaAtual is not IAbaUtilitario aba) return;
-        int altura = aba.AlturaPreferida;
-        if (altura > 0 && ClientSize.Height != altura) ClientSize = new Size(ClientSize.Width, altura);
+        if (_posicionando || _abaAtual is null || !IsHandleCreated) return;
+        _posicionando = true;
+        try
+        {
+            float escala = DeviceDpi / 96f;
+            int disponivel = areaConteudo.ClientSize.Width;
+            int largura = Math.Max(1, Math.Min(disponivel, (int)(LarguraMaximaConteudo * escala)));
+            int x = Math.Max(0, (disponivel - largura) / 2);
+
+            // Mudar a largura reorganiza o conteúdo; só depois a altura preferida é lida
+            if (_abaAtual.Width != largura) _abaAtual.Width = largura;
+            int altura = _abaAtual is IAbaUtilitario aba ? aba.AlturaPreferida : areaConteudo.ClientSize.Height;
+
+            var rolagem = areaConteudo.AutoScrollPosition;
+            _abaAtual.Bounds = new Rectangle(x + rolagem.X, rolagem.Y, largura, Math.Max(1, altura));
+        }
+        finally
+        {
+            _posicionando = false;
+        }
+    }
+
+    // ---------------- Tamanho e posição da janela ----------------
+
+    // Reabre do jeito que a pessoa deixou (na primeira vez, maximizada)
+    void RestaurarEstadoJanela()
+    {
+        var estado = EstadoJanela.Carregar();
+        if (estado is null) return;
+        StartPosition = FormStartPosition.Manual;
+        WindowState = FormWindowState.Normal;
+        Bounds = estado.Retangulo;
+        WindowState = estado.Maximizada ? FormWindowState.Maximized : FormWindowState.Normal;
+        _estadoVisivel = WindowState;
+    }
+
+    void SalvarEstadoJanela()
+    {
+        var area = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+        bool maximizada = WindowState == FormWindowState.Maximized ||
+                          (WindowState == FormWindowState.Minimized && _estadoVisivel == FormWindowState.Maximized);
+        new EstadoJanela(area.X, area.Y, area.Width, area.Height, maximizada).Salvar();
     }
 
     // ---------------- Bandeja do sistema ----------------
 
     void ConfigurarBandeja()
     {
-        trayIcon.Icon = Tema.IconePrograma ?? Icon;
+        trayIcon.Icon = Tema.IconeBandeja ?? Tema.IconePrograma ?? Icon;
         var menu = new ContextMenuStrip();
         menu.Items.Add("Abrir", null, (s, e) => MostrarJanela());
         menu.Items.Add("Sair", null, (s, e) => { _saindoDeVerdade = true; Close(); });
@@ -121,15 +170,41 @@ public class FormPrincipal : Form
         trayIcon.Visible = true;
     }
 
+    // Outra execução do programa pediu para mostrar esta janela (instância única)
+    public void EscutarPedidosParaMostrar(EventWaitHandle pedido)
+    {
+        var thread = new Thread(() =>
+        {
+            while (true)
+            {
+                pedido.WaitOne();
+                if (IsDisposed) return;
+                try { BeginInvoke(MostrarJanela); }
+                catch (InvalidOperationException) { return; }   // janela já fechada
+            }
+        })
+        { IsBackground = true, Name = "Pedidos para mostrar a janela" };
+        thread.Start();
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        // Tira o ícone da bandeja na hora (senão ele fica "fantasma" até passar o mouse)
+        trayIcon.Visible = false;
+        trayIcon.Dispose();
+        base.OnFormClosed(e);
+    }
+
     void MostrarJanela()
     {
         Show();
-        WindowState = FormWindowState.Normal;
+        WindowState = _estadoVisivel;
         Activate();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        if (Visible) SalvarEstadoJanela();
         if (!_saindoDeVerdade && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
@@ -148,6 +223,11 @@ public class FormPrincipal : Form
     {
         base.OnResize(e);
         if (WindowState == FormWindowState.Minimized) Hide();
+        else
+        {
+            _estadoVisivel = WindowState;
+            Invalidate(true);   // repinta tudo ao maximizar/restaurar (sem restos da borda antiga)
+        }
     }
 
     // ---------------- Atualização automática ----------------

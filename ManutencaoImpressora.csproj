@@ -2,19 +2,32 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- windows10.0.19041: libera as APIs do Windows usadas para ler o histórico de uso de dados -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ManutencaoImpressora</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <Version>1.5.0</Version>
+    <Version>2.0.0</Version>
     <ApplicationIcon>icone.ico</ApplicationIcon>
+    <!-- WFO1000 (.NET 9+): avisa sobre propriedades públicas de controles sem configuração para o
+         designer do Visual Studio. Os controles daqui são montados em código, não no designer. -->
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
-    <PackageReference Include="System.Management" Version="8.0.0" />
+    <!-- O ícone também vai como recurso, para as janelas e a bandeja não pegarem a versão antiga do cache do Windows -->
+    <EmbeddedResource Include="icone.ico" LogicalName="icone.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.*" />
+    <PackageReference Include="System.Management" Version="10.0.*" />
+    <!-- Uso de internet por app: eventos de rede do kernel (ETW) e o serviço do Windows -->
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.1.*" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.*" />
   </ItemGroup>
 
 </Project>

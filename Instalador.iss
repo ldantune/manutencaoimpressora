@@ -4,7 +4,7 @@
 ; Iniciar, e remove o agendamento automático (se houver) ao desinstalar.
 
 #define MyAppName "L2 Utilitários"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "2.0.0"
 #define MyAppExeName "ManutencaoImpressora.exe"
 
 [Setup]
@@ -39,7 +39,21 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+; Serviço que conta o uso de internet por aplicativo (roda como Sistema)
+Filename: "{app}\{#MyAppExeName}"; Parameters: "/instalar-servico"; StatusMsg: "Instalando o monitor de rede..."; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "Abrir o programa agora"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+Filename: "{app}\{#MyAppExeName}"; Parameters: "/remover-servico"; Flags: runhidden waituntilterminated; RunOnceId: "RemoverServicoMonitor"
 Filename: "schtasks.exe"; Parameters: "/delete /tn ""ManutencaoImpressora"" /f"; Flags: runhidden; RunOnceId: "RemoverTarefaAgendada"
+
+[Code]
+// Na atualização, para o serviço antes de copiar os arquivos (senão o .exe fica em uso)
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop L2UtilitariosMonitor', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(3000);
+  Result := '';
+end;

@@ -32,6 +32,13 @@ static class Tema
     public static readonly Font CorpoForte = new("Segoe UI Semibold", 9.75f);
     public static readonly Font Legenda = new("Segoe UI", 9f);
     public static readonly Font Subtitulo = new("Segoe UI Semibold", 10.5f);
+    public static readonly Font Numero = new("Segoe UI Semibold", 15f);
+
+    // Cores dos gráficos de rede (diferem também em claridade, não só no tom)
+    public static readonly Color CorDownload = Color.FromArgb(0, 95, 184);
+    public static readonly Color CorUpload = Color.FromArgb(127, 203, 114);
+    public static readonly Color CorUploadTexto = Color.FromArgb(46, 125, 50);
+
     public static readonly Font Titulo = new("Segoe UI Semibold", 17f);
 
     public static readonly string FonteIcones = DetectarFonteIcones();
@@ -90,11 +97,22 @@ static class Tema
         g.DrawPath(pen, path);
     }
 
-    // Ícone do programa (o mesmo embutido no .exe), usado nas janelas
-    public static Icon? IconePrograma { get; } = CarregarIcone();
+    // Ícone do programa, lido do recurso embutido no .exe (o cache de ícones
+    // do Windows pode devolver uma versão antiga do ícone do arquivo)
+    public static Icon? IconePrograma { get; } = CarregarIcone(null);
 
-    static Icon? CarregarIcone()
+    // Versão pequena para a bandeja do sistema (16 px a 100%, 24 px a 150%...)
+    public static Icon? IconeBandeja { get; } = CarregarIcone(SystemInformation.SmallIconSize);
+
+    static Icon? CarregarIcone(Size? tamanho)
     {
+        try
+        {
+            using var recurso = typeof(Tema).Assembly.GetManifestResourceStream("icone.ico");
+            if (recurso != null)
+                return tamanho is Size t ? new Icon(recurso, t) : new Icon(recurso);
+        }
+        catch { }
         try { return Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
         catch { return null; }
     }

@@ -1,5 +1,7 @@
 @echo off
 echo Gerando o executavel...
+rem Limpa a publicacao anterior (senao arquivos de versoes antigas do .NET vao junto no instalador)
+if exist publicado rmdir /s /q publicado
 dotnet publish -c Release -r win-x64 --self-contained true -o publicado
 if errorlevel 1 goto fim
 

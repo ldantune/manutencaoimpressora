@@ -73,8 +73,10 @@ public class AbaImpressora : UserControl, IAbaUtilitario
             ForeColor = Tema.TextoSecundario, AutoSize = true, MaximumSize = new Size(470, 0), Margin = new Padding(0, 0, 0, 14)
         });
         AdicionarConteudo(barraStatus);
-        AdicionarConteudo(MontarCardImpressora());
-        AdicionarConteudo(MontarCardAgendamento());
+        var cartoes = new GradeAdaptativa { LarguraMinimaColuna = 440, MaximoColunas = 2, Espaco = 16 };
+        cartoes.Adicionar(MontarCardImpressora());
+        cartoes.Adicionar(MontarCardAgendamento());
+        AdicionarConteudo(cartoes);
 
         MontarRodape();
 
