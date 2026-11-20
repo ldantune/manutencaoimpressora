@@ -93,6 +93,10 @@ public class AbaImpressora : UserControl, IAbaUtilitario
         PerformLayout();
 
         conteudo.SizeChanged += (s, e) => AlturaMudou?.Invoke(this, EventArgs.Empty);
+
+        // A lista de impressoras instaladas pode mudar enquanto o programa está aberto
+        // (impressora plugada/removida); atualiza sempre que esta aba volta a ficar visível.
+        VisibleChanged += (s, e) => { if (Visible) AtualizarListaImpressoras(); };
     }
 
     public event EventHandler? AlturaMudou;
@@ -267,17 +271,29 @@ public class AbaImpressora : UserControl, IAbaUtilitario
 
     // ---------------- Dados ----------------
 
-    void CarregarTela()
+    // Recarrega a lista de impressoras instaladas sem perder a que já está selecionada
+    void AtualizarListaImpressoras()
     {
-        var cfg = Config.Carregar(_arquivoConfig);
+        string? selecionada = cbImpressora.SelectedItem?.ToString();
 
+        cbImpressora.Items.Clear();
         foreach (string nome in PrinterSettings.InstalledPrinters)
             cbImpressora.Items.Add(nome);
 
         string padrao = new PrinterSettings().PrinterName;
-        string escolhida = string.IsNullOrWhiteSpace(cfg.Impressora) ? padrao : cfg.Impressora;
+        string escolhida = string.IsNullOrWhiteSpace(selecionada) ? padrao : selecionada;
         if (cbImpressora.Items.Contains(escolhida)) cbImpressora.SelectedItem = escolhida;
         else if (cbImpressora.Items.Count > 0) cbImpressora.SelectedIndex = 0;
+    }
+
+    void CarregarTela()
+    {
+        var cfg = Config.Carregar(_arquivoConfig);
+
+        string? padraoInicial = string.IsNullOrWhiteSpace(cfg.Impressora) ? null : cfg.Impressora;
+        AtualizarListaImpressoras();
+        if (padraoInicial != null && cbImpressora.Items.Contains(padraoInicial))
+            cbImpressora.SelectedItem = padraoInicial;
 
         txtDocumento.Text = cfg.CaminhoDocumento;
 
