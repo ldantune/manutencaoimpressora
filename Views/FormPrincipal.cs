@@ -26,6 +26,12 @@ public class FormPrincipal : Form
     Control? _abaAtual;
     readonly AbaImpressora abaImpressora;
     readonly AbaRede abaRede;
+    readonly AbaConexao abaConexao;
+    readonly AbaDispositivos abaDispositivos;
+    readonly AbaSaude abaSaude = new();
+    readonly AbaInicializacao abaInicializacao = new();
+    readonly AbaEnergia abaEnergia = new();
+    readonly AbaLimpeza abaLimpeza = new();
     readonly NotifyIcon trayIcon = new() { Text = NomeApp };
     bool _saindoDeVerdade;
 
@@ -33,6 +39,8 @@ public class FormPrincipal : Form
     {
         abaImpressora = new AbaImpressora(arquivoConfig, log, agendador);
         abaRede = new AbaRede(historicoRede);
+        abaConexao = new AbaConexao();
+        abaDispositivos = new AbaDispositivos();
 
         SuspendLayout();
         AutoScaleDimensions = new SizeF(96F, 96F);
@@ -52,7 +60,16 @@ public class FormPrincipal : Form
         MinimumSize = new Size(LarguraMenu + 560, 560);
         WindowState = FormWindowState.Maximized;
 
+        AdicionarGrupo("Internet");
         AdicionarAba("Rede", Icones.Rede, abaRede);
+        AdicionarAba("Conexão", Icones.Conexao, abaConexao);
+        AdicionarAba("Dispositivos", Icones.Dispositivos, abaDispositivos);
+        AdicionarGrupo("Computador");
+        AdicionarAba("Saúde do PC", Icones.Saude, abaSaude);
+        AdicionarAba("Inicialização", Icones.Inicializacao, abaInicializacao);
+        AdicionarAba("Energia", Icones.Energia, abaEnergia);
+        AdicionarAba("Limpeza", Icones.Limpeza, abaLimpeza);
+        AdicionarGrupo("Impressão");
         AdicionarAba("Impressora", Icones.Imprimir, abaImpressora);
         Controls.Add(menuLateral);
         Controls.Add(areaConteudo);
@@ -80,6 +97,18 @@ public class FormPrincipal : Form
         Tema.AplicarBarraTitulo(this);
     }
 
+    // Título pequeno separando os grupos do menu lateral
+    void AdicionarGrupo(string titulo)
+    {
+        var rotulo = new Label
+        {
+            Text = titulo, Font = Tema.Legenda, ForeColor = Tema.TextoSecundario, Dock = DockStyle.Top,
+            AutoSize = false, Height = 32, TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(14, 0, 0, 4)
+        };
+        menuLateral.Controls.Add(rotulo);
+        rotulo.BringToFront();   // mesma ordem dos itens
+    }
+
     void AdicionarAba(string titulo, string icone, Control aba)
     {
         var botao = new BotaoNavegacao { Text = titulo, Icone = icone, AccessibleName = titulo };
@@ -91,6 +120,10 @@ public class FormPrincipal : Form
         areaConteudo.Controls.Add(aba);
 
         botao.CheckedChanged += (s, e) => { if (botao.Checked) MostrarAba(aba); };
+        // Avisos na bandeja (internet caiu/voltou, aparelho novo na rede)
+        if (aba is INotificador notificador)
+            notificador.Notificar += (titulo, texto, icone) => trayIcon.ShowBalloonTip(6000, titulo, texto, icone);
+
         if (aba is IAbaUtilitario utilitario)
             utilitario.AlturaMudou += (s, e) => { if (aba == _abaAtual) PosicionarAba(); };
 
@@ -100,13 +133,57 @@ public class FormPrincipal : Form
     void MostrarAba(Control aba)
     {
         if (_abaAtual == aba) return;
-        areaConteudo.SuspendLayout();
-        if (_abaAtual != null) _abaAtual.Visible = false;
-        aba.Visible = true;
-        _abaAtual = aba;
-        areaConteudo.AutoScrollPosition = Point.Empty;
-        areaConteudo.ResumeLayout(true);
-        PosicionarAba();
+        // Congela o desenho da área durante a troca e mostra a tela nova já pronta, de uma vez
+        bool congelou = areaConteudo.IsHandleCreated;
+        if (congelou) SendMessage(areaConteudo.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        try
+        {
+            areaConteudo.SuspendLayout();
+            if (_abaAtual != null) _abaAtual.Visible = false;
+            aba.Visible = true;
+            _abaAtual = aba;
+            areaConteudo.AutoScrollPosition = Point.Empty;
+            areaConteudo.ResumeLayout(true);
+            PosicionarAba();
+        }
+        finally
+        {
+            if (congelou)
+            {
+                SendMessage(areaConteudo.Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                areaConteudo.Invalidate(true);
+                areaConteudo.Update();
+            }
+        }
+    }
+
+    // Na bandeja a janela não é desenhada: depois de alguns segundos escondida, recolhe a memória
+    // que as telas usaram e devolve ao Windows o que não está em uso
+    async void LiberarMemoriaAoEsconder()
+    {
+        await Task.Delay(5_000);
+        if (Visible) return;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false, compacting: true);
+        try { SetProcessWorkingSetSize(System.Diagnostics.Process.GetCurrentProcess().Handle, -1, -1); } catch { }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern bool SetProcessWorkingSetSize(IntPtr processo, nint minimo, nint maximo);
+
+    const int WM_SETREDRAW = 0x000B;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr SendMessage(IntPtr janela, int mensagem, IntPtr wParam, IntPtr lParam);
+
+    // Pinta a janela inteira num buffer antes de mostrar (sem os "pedaços brancos")
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parametros = base.CreateParams;
+            parametros.ExStyle |= 0x02000000;   // WS_EX_COMPOSITED
+            return parametros;
+        }
     }
 
     // Layout adaptativo: o utilitário ocupa a largura disponível (até um limite,
@@ -209,6 +286,7 @@ public class FormPrincipal : Form
         {
             e.Cancel = true;
             Hide();
+            LiberarMemoriaAoEsconder();
             trayIcon.ShowBalloonTip(2000, Text,
                 "O programa continua rodando em segundo plano. Clique no ícone para abrir de novo.",
                 ToolTipIcon.Info);
@@ -222,7 +300,11 @@ public class FormPrincipal : Form
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        if (WindowState == FormWindowState.Minimized) Hide();
+        if (WindowState == FormWindowState.Minimized)
+        {
+            Hide();
+            LiberarMemoriaAoEsconder();
+        }
         else
         {
             _estadoVisivel = WindowState;

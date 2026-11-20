@@ -46,7 +46,7 @@ public class AbaRede : UserControl, IAbaUtilitario
     NetworkInterface[] _interfaces = Array.Empty<NetworkInterface>();
     readonly Dictionary<string, (long Recebidos, long Enviados)> _anterioresPorInterface = new();
     long _pendenteRecebidos, _pendenteEnviados;
-    int _segundosDesdeUltimoFlush;
+    DateTime _ultimoFlush = DateTime.Now;
     bool _primeiraAmostraSelecionada = true;
 
     public int AlturaPreferida => conteudo.Height;
@@ -90,6 +90,11 @@ public class AbaRede : UserControl, IAbaUtilitario
         cbInterface.SelectedIndexChanged += (s, e) => ReiniciarAmostragemSelecionada();
         _timer.Tick += (s, e) => AtualizarAmostra();
         _timer.Start();
+        VisibleChanged += (s, e) =>
+        {
+            if (Visible) _primeiraAmostraSelecionada = true;   // evita um "pico" falso depois de um intervalo longo
+            AjustarRitmo();
+        };
         AtualizarResumoUso();
 
         ResumeLayout(false);
@@ -275,8 +280,25 @@ public class AbaRede : UserControl, IAbaUtilitario
 
     // A cada segundo: mede todas as interfaces ativas (para contar o uso
     // total certo), mas só mostra o gráfico/velocidade da selecionada
+    // Ritmo da medição: 1 s com a tela aberta (gráfico ao vivo); escondida, 5 s se for a tela
+    // que conta o uso, ou 1 minuto (só conferindo o monitor) se o serviço já está contando
+    void AjustarRitmo()
+    {
+        int intervalo = Visible ? 1_000 : _monitorRodando ? 60_000 : 5_000;
+        if (_timer.Interval != intervalo) _timer.Interval = intervalo;
+    }
+
     void AtualizarAmostra()
     {
+        if (!Visible && _monitorRodando)
+        {
+            // O monitor está contando: aqui só confere se ele continua rodando
+            _monitorRodando = InstaladorServico.EstaRodando();
+            _anterioresPorInterface.Clear();
+            AjustarRitmo();
+            return;
+        }
+
         int indiceSelecionado = cbInterface.SelectedIndex;
         long totalRecebidosTick = 0, totalEnviadosTick = 0;
 
@@ -297,7 +319,7 @@ public class AbaRede : UserControl, IAbaUtilitario
                 totalRecebidosTick += down;
                 totalEnviadosTick += up;
 
-                if (i == indiceSelecionado && !_primeiraAmostraSelecionada)
+                if (Visible && i == indiceSelecionado && !_primeiraAmostraSelecionada)
                 {
                     lblDownload.Text = "↓ " + FormatarTaxa(down);
                     lblUpload.Text = "↑ " + FormatarTaxa(up);
@@ -312,7 +334,7 @@ public class AbaRede : UserControl, IAbaUtilitario
 
         _pendenteRecebidos += totalRecebidosTick;
         _pendenteEnviados += totalEnviadosTick;
-        if (++_segundosDesdeUltimoFlush >= SegundosPorFlush)
+        if ((DateTime.Now - _ultimoFlush).TotalSeconds >= SegundosPorFlush)
         {
             Descarregar();
             AtualizarResumoUso();
@@ -334,7 +356,8 @@ public class AbaRede : UserControl, IAbaUtilitario
             _historicoRede.Acumular(DateTime.Today, _pendenteRecebidos, _pendenteEnviados);
         _pendenteRecebidos = 0;
         _pendenteEnviados = 0;
-        _segundosDesdeUltimoFlush = 0;
+        _ultimoFlush = DateTime.Now;
+        AjustarRitmo();
     }
 
     void AtualizarResumoUso()

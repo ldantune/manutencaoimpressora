@@ -24,7 +24,9 @@ public class Interruptor : CheckBox
         g.Clear(Parent?.BackColor ?? Tema.Card);
         float s = Tema.Escala(this);
 
-        int largura = (int)Math.Round(40 * s), altura = (int)Math.Round(20 * s);
+        // O desenho sempre cabe no controle (que pode ter sido criado com ou sem o ajuste de zoom do Windows)
+        int altura = Math.Min(Height - 4, (Width - 4) / 2);
+        int largura = altura * 2;
         var trilho = new Rectangle((Width - largura) / 2, (Height - altura) / 2, largura, altura);
 
         if (Checked)
@@ -32,7 +34,7 @@ public class Interruptor : CheckBox
         else
             Tema.Caixa(g, trilho, altura / 2f, _hover ? Tema.BotaoHover : Color.White, Tema.BordaControle);
 
-        float bola = (_hover ? 14 : 12) * s;
+        float bola = altura * (_hover ? 0.7f : 0.6f);
         float margem = (altura - bola) / 2f;
         float x = Checked ? trilho.Right - margem - bola - 1 : trilho.X + margem + 1;
         using (var b = new SolidBrush(Checked ? Color.White : Tema.TextoSecundario))

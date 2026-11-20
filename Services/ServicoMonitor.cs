@@ -10,6 +10,7 @@ namespace ManutencaoImpressora.Services;
 public class ServicoMonitor : ServiceBase
 {
     MonitorRedePorApp? _monitor;
+    MonitorConexao? _conexao;
 
     public ServicoMonitor()
     {
@@ -31,6 +32,17 @@ public class ServicoMonitor : ServiceBase
             LogMonitor.Registrar("Falha ao iniciar o serviço: " + ex);
             throw;   // o Windows marca o serviço como parado e tenta de novo em 1 minuto
         }
+
+        // Quedas da internet: se falhar, o resto do monitor continua
+        try
+        {
+            _conexao = new MonitorConexao(new BancoUsoApps(BancoUsoApps.CaminhoPadrao));
+            _conexao.Iniciar();
+        }
+        catch (Exception ex)
+        {
+            LogMonitor.Registrar("Falha ao iniciar a medição de quedas: " + ex.Message);
+        }
     }
 
     protected override void OnStop() => Encerrar();
@@ -38,6 +50,8 @@ public class ServicoMonitor : ServiceBase
 
     void Encerrar()
     {
+        _conexao?.Dispose();
+        _conexao = null;
         _monitor?.Dispose();
         _monitor = null;
     }

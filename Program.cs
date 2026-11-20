@@ -27,6 +27,8 @@ static class Program
         }
         if (Tem("/instalar-servico")) return InstaladorServico.Instalar();
         if (Tem("/remover-servico")) return InstaladorServico.Remover();
+        if (Tem("/inicializacao")) return ItensInicializacao.ExecutarComoAdministrador(args);
+        if (Tem("/limpar-atualizacoes")) return Limpador.LimparAtualizacoesComoAdministrador();
 
         string pastaDados = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ManutencaoImpressora");

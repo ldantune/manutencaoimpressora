@@ -10,6 +10,8 @@ namespace ManutencaoImpressora.Services;
 //  não precisa de permissão de administrador.
 //    UsoApp       = uso por aplicativo e por dia
 //    UsoInterface = uso total por conexão (Wi-Fi, Ethernet...) e por dia
+//    Latencia     = ping somado por minuto (estabilidade da conexão)
+//    Queda        = cada período sem internet
 // ---------------------------------------------------------------
 public class BancoUsoApps
 {
@@ -68,6 +70,19 @@ public class BancoUsoApps
                 Recebidos INTEGER NOT NULL DEFAULT 0,
                 Enviados INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (Data, Interface)
+            );
+            CREATE TABLE IF NOT EXISTS Latencia (
+                Minuto TEXT PRIMARY KEY,
+                Soma REAL NOT NULL DEFAULT 0,
+                Maximo REAL NOT NULL DEFAULT 0,
+                Respostas INTEGER NOT NULL DEFAULT 0,
+                Perdas INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS Queda (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Inicio TEXT NOT NULL,
+                Fim TEXT,
+                Motivo TEXT NOT NULL DEFAULT ''
             );
             """;
         comando.ExecuteNonQuery();
@@ -218,5 +233,147 @@ public class BancoUsoApps
             return Data(comando.ExecuteScalar());
         }
         catch { return null; }
+    }
+
+    // ---------------- Estabilidade da conexão ----------------
+
+    const string FormatoMomento = "yyyy-MM-dd HH:mm:ss";
+    const string FormatoMinuto = "yyyy-MM-dd HH:mm";
+
+    static DateTime? Momento(object? valor) =>
+        valor is string s && DateTime.TryParseExact(s, new[] { FormatoMomento, FormatoMinuto }, CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out var d) ? d : null;
+
+    // Soma as medições de ping de cada minuto (serviço)
+    public void RegistrarLatencia(IEnumerable<MinutoLatencia> minutos)
+    {
+        using var conexao = AbrirEscrita();
+        using var transacao = conexao.BeginTransaction();
+        using var comando = conexao.CreateCommand();
+        comando.Transaction = transacao;
+        comando.CommandText = """
+            INSERT INTO Latencia (Minuto, Soma, Maximo, Respostas, Perdas) VALUES ($minuto, $soma, $maximo, $respostas, $perdas)
+            ON CONFLICT(Minuto) DO UPDATE SET
+                Soma = Soma + $soma, Maximo = MAX(Maximo, $maximo),
+                Respostas = Respostas + $respostas, Perdas = Perdas + $perdas
+            """;
+        var pMinuto = comando.Parameters.Add("$minuto", SqliteType.Text);
+        var pSoma = comando.Parameters.Add("$soma", SqliteType.Real);
+        var pMaximo = comando.Parameters.Add("$maximo", SqliteType.Real);
+        var pRespostas = comando.Parameters.Add("$respostas", SqliteType.Integer);
+        var pPerdas = comando.Parameters.Add("$perdas", SqliteType.Integer);
+        foreach (var m in minutos)
+        {
+            pMinuto.Value = m.Minuto.ToString(FormatoMinuto, CultureInfo.InvariantCulture);
+            pSoma.Value = m.Soma;
+            pMaximo.Value = m.Maximo;
+            pRespostas.Value = m.Respostas;
+            pPerdas.Value = m.Perdas;
+            comando.ExecuteNonQuery();
+        }
+        transacao.Commit();
+    }
+
+    public long? AbrirQueda(DateTime inicio, string motivo)
+    {
+        try
+        {
+            using var conexao = AbrirEscrita();
+            using var comando = conexao.CreateCommand();
+            comando.CommandText = "INSERT INTO Queda (Inicio, Motivo) VALUES ($inicio, $motivo); SELECT last_insert_rowid();";
+            comando.Parameters.AddWithValue("$inicio", inicio.ToString(FormatoMomento, CultureInfo.InvariantCulture));
+            comando.Parameters.AddWithValue("$motivo", motivo);
+            return Convert.ToInt64(comando.ExecuteScalar());
+        }
+        catch { return null; }
+    }
+
+    public void FecharQueda(long id, DateTime fim)
+    {
+        try
+        {
+            using var conexao = AbrirEscrita();
+            using var comando = conexao.CreateCommand();
+            comando.CommandText = "UPDATE Queda SET Fim = $fim WHERE Id = $id";
+            comando.Parameters.AddWithValue("$fim", fim.ToString(FormatoMomento, CultureInfo.InvariantCulture));
+            comando.Parameters.AddWithValue("$id", id);
+            comando.ExecuteNonQuery();
+        }
+        catch { }
+    }
+
+    // Ao iniciar o serviço: quedas que ficaram abertas (PC desligado, serviço parado) terminam
+    // no último minuto em que houve medição depois delas
+    public void FecharQuedasAbertas()
+    {
+        try
+        {
+            using var conexao = AbrirEscrita();
+            using var comando = conexao.CreateCommand();
+            comando.CommandText = """
+                UPDATE Queda SET Fim = COALESCE(
+                    (SELECT MAX(Minuto) || ':59' FROM Latencia WHERE Minuto >= substr(Queda.Inicio, 1, 16)), Inicio)
+                WHERE Fim IS NULL
+                """;
+            comando.ExecuteNonQuery();
+        }
+        catch { }
+    }
+
+    public List<MinutoLatencia> ListarLatencia(DateTime desde)
+    {
+        var lista = new List<MinutoLatencia>();
+        try
+        {
+            using var conexao = AbrirLeitura();
+            if (conexao is null) return lista;
+            using var comando = conexao.CreateCommand();
+            comando.CommandText = "SELECT Minuto, Soma, Maximo, Respostas, Perdas FROM Latencia WHERE Minuto >= $desde ORDER BY Minuto";
+            comando.Parameters.AddWithValue("$desde", desde.ToString(FormatoMinuto, CultureInfo.InvariantCulture));
+            using var leitor = comando.ExecuteReader();
+            while (leitor.Read())
+                if (Momento(leitor.GetString(0)) is DateTime minuto)
+                    lista.Add(new MinutoLatencia(minuto, leitor.GetDouble(1), leitor.GetDouble(2), leitor.GetInt32(3), leitor.GetInt32(4)));
+        }
+        catch { }
+        return lista;
+    }
+
+    public DateTime? PrimeiroMinutoLatencia()
+    {
+        try
+        {
+            using var conexao = AbrirLeitura();
+            if (conexao is null) return null;
+            using var comando = conexao.CreateCommand();
+            comando.CommandText = "SELECT MIN(Minuto) FROM Latencia";
+            return Momento(comando.ExecuteScalar());
+        }
+        catch { return null; }
+    }
+
+    // Quedas que terminaram depois de "desde" (ou ainda abertas), da mais recente para a mais antiga
+    public List<Queda> ListarQuedas(DateTime desde, int limite)
+    {
+        var lista = new List<Queda>();
+        try
+        {
+            using var conexao = AbrirLeitura();
+            if (conexao is null) return lista;
+            using var comando = conexao.CreateCommand();
+            comando.CommandText = """
+                SELECT Id, Inicio, Fim, Motivo FROM Queda
+                WHERE Fim IS NULL OR Fim >= $desde
+                ORDER BY Inicio DESC LIMIT $limite
+                """;
+            comando.Parameters.AddWithValue("$desde", desde.ToString(FormatoMomento, CultureInfo.InvariantCulture));
+            comando.Parameters.AddWithValue("$limite", limite);
+            using var leitor = comando.ExecuteReader();
+            while (leitor.Read())
+                if (Momento(leitor.GetString(1)) is DateTime inicio)
+                    lista.Add(new Queda(leitor.GetInt64(0), inicio, leitor.IsDBNull(2) ? null : Momento(leitor.GetString(2)), leitor.GetString(3)));
+        }
+        catch { }
+        return lista;
     }
 }

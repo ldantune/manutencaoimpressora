@@ -58,8 +58,11 @@ static class Tema
     public static GraphicsPath Arredondado(RectangleF r, float raio)
     {
         var p = new GraphicsPath();
+        // Peças pequenas (interruptor, barrinhas): o raio é limitado à metade do lado menor,
+        // em vez de desistir do arredondado e desenhar um retângulo
+        raio = Math.Min(raio, Math.Min(r.Width, r.Height) / 2);
         float d = raio * 2;
-        if (d <= 0 || r.Width < d || r.Height < d)
+        if (d <= 0.5f)
         {
             p.AddRectangle(r);
             return p;
@@ -145,4 +148,12 @@ static class Icones
     public const string Info = "";
     public const string Pasta = "";
     public const string Rede = "\uE839";
+    public const string Conexao = "\uE701";
+    public const string Dispositivos = "\uE772";
+    public const string Velocidade = "\uE916";
+    public const string Atualizar = "\uE72C";
+    public const string Saude = "\uE9D9";
+    public const string Inicializacao = "\uE7E8";
+    public const string Energia = "\uE945";
+    public const string Limpeza = "\uE74D";
 }

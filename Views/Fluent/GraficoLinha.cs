@@ -27,6 +27,14 @@ public class GraficoLinha : Control
         Invalidate();
     }
 
+    public void DefinirAmostras(IEnumerable<double> valores)
+    {
+        _amostras.Clear();
+        foreach (var v in valores) _amostras.Enqueue(v);
+        while (_amostras.Count > MaximoAmostras) _amostras.Dequeue();
+        Invalidate();
+    }
+
     public void Limpar()
     {
         _amostras.Clear();
