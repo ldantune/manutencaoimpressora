@@ -12,13 +12,18 @@ namespace ManutencaoImpressora.Views.Abas;
 public class AbaSaude : AbaBase, INotificador
 {
     const int SegundosEntreLeituras = 2;
-    const double LimiteDisco = 0.90, LimiteMemoria = 0.90;
+    const double LimiteDisco = 0.90, LimiteMemoria = 0.85;
+    const int MinutosMemoriaAltaParaAvisar = 5;
+    static readonly TimeSpan IntervaloEntreAvisosMemoria = TimeSpan.FromHours(2);
     static readonly Color CorAlerta = Color.FromArgb(157, 93, 0);
 
     readonly InfoSistema _info = new();
     readonly AmostradorProcessos _processos = new();
     readonly System.Windows.Forms.Timer _timer = new() { Interval = SegundosEntreLeituras * 1000 };
-    readonly System.Windows.Forms.Timer _timerDisco = new() { Interval = 10 * 60 * 1000 };
+    // Em segundo plano: memória a cada 1 min (leitura levíssima) e disco a cada 10 min
+    readonly System.Windows.Forms.Timer _timerDisco = new() { Interval = 60 * 1000 };
+    int _minutosMemoriaAlta, _ticksFundo;
+    DateTime _ultimoAvisoMemoria = DateTime.MinValue;
 
     readonly BarraStatus barra = new() { Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 0, 0, 12) };
     readonly CartaoValor cartaoCpu = new(), cartaoMemoria = new(), cartaoGpu = new(), cartaoDisco = new(), cartaoLigado = new();
@@ -87,7 +92,11 @@ public class AbaSaude : AbaBase, INotificador
         _info.UsoProcessador();   // primeira leitura só marca o ponto de partida
         _timer.Tick += (s, e) => Ler();
         // Com a tela escondida não mede nada: só confere o disco a cada 10 minutos (aviso na bandeja)
-        _timerDisco.Tick += (s, e) => VerificarDiscoCheio();
+        _timerDisco.Tick += async (s, e) =>
+        {
+            if (++_ticksFundo % 10 == 0) VerificarDiscoCheio();
+            await VerificarMemoriaAsync();
+        };
         _timerDisco.Start();
         VisibleChanged += (s, e) =>
         {
@@ -137,11 +146,13 @@ public class AbaSaude : AbaBase, INotificador
             barra.Definir(Severidade.Aviso, $"A placa de vídeo está quente ({temp:0} °C)",
                 "Acima de 85 °C ela reduz o desempenho para se proteger. Vale limpar a poeira e conferir as ventoinhas.");
         else if (usoMemoria >= LimiteMemoria)
-            barra.Definir(Severidade.Aviso, $"A memória está quase toda em uso ({usoMemoria:P0})",
-                "Fechar programas que não estão sendo usados (veja \"O que mais pesa agora\") deixa o computador mais rápido.");
+            barra.Definir(Severidade.Aviso, $"A memória está quase toda em uso ({usoMemoria:P0})", SugestaoMemoria(_processos.PorMemoria));
+        else if (InfoSistema.TempoLigado().TotalDays >= 7)
+            barra.Definir(Severidade.Sucesso, "Tudo certo com o computador",
+                $"Só uma dica: ele está ligado há {FormatoTempo.Duracao(InfoSistema.TempoLigado())}. Reiniciar de vez em quando libera memória e conclui atualizações.");
         else
             barra.Definir(Severidade.Sucesso, "Tudo certo com o computador",
-                "Nada fora do normal agora. O programa avisa na bandeja se o disco ficar quase cheio.");
+                "Nada fora do normal agora. O programa avisa na bandeja se a memória ou o disco ficarem quase cheios.");
 
         cartaoCpu.Definir("Processador", "agora", $"{cpu:0}%", NomeProcessador.Split(" · ")[0]);
         cartaoMemoria.Definir("Memória", "agora", $"{Gb(total - livre)} de {Gb(total)} GB",
@@ -167,6 +178,43 @@ public class AbaSaude : AbaBase, INotificador
         }).ToList());
 
         _ = LerProcessosAsync();
+    }
+
+    // O que fazer com a memória cheia: quem mais usa, WSL/Docker e reiniciar (se ligado há muito tempo)
+    static string SugestaoMemoria(List<ProcessoPesado> maiores)
+    {
+        var partes = new List<string>();
+        if (maiores.Count > 0)
+            partes.Add("Quem mais usa: " + string.Join(", ", maiores.Take(3).Select(p => $"{p.Nome} ({FormatoBytes.Formatar(p.Memoria)})")) + ".");
+        if (maiores.Take(3).Any(AmostradorProcessos.EhWsl))
+            partes.Add("O WSL/Docker pode ser limitado no arquivo .wslconfig (ex.: memory=6GB).");
+        var ligado = InfoSistema.TempoLigado();
+        partes.Add(ligado.TotalDays >= 7
+            ? $"O PC está ligado há {FormatoTempo.Duracao(ligado)}: reiniciar costuma liberar vários GB."
+            : "Fechar o que não está usando deixa o computador mais rápido.");
+        return string.Join(" ", partes);
+    }
+
+    // A cada minuto, mesmo com a tela escondida: memória acima de 85% por 5 minutos seguidos gera
+    // um aviso na bandeja (no máximo a cada 2 horas)
+    async Task VerificarMemoriaAsync()
+    {
+        var (total, livre) = InfoSistema.Memoria();
+        if (total == 0) return;
+        double uso = 1 - (double)livre / total;
+        if (uso < LimiteMemoria) { _minutosMemoriaAlta = 0; return; }
+        if (++_minutosMemoriaAlta < MinutosMemoriaAltaParaAvisar) return;
+        if (DateTime.Now - _ultimoAvisoMemoria < IntervaloEntreAvisosMemoria) return;
+        _ultimoAvisoMemoria = DateTime.Now;
+
+        // Com a tela aberta a lista já está em dia; escondida, só agora percorre os processos para achar o culpado
+        if (!Visible && !_lendoProcessos)
+        {
+            _lendoProcessos = true;
+            try { await Task.Run(() => _processos.Ler(6)); }
+            finally { _lendoProcessos = false; }
+        }
+        Notificar?.Invoke($"Memória quase cheia ({uso:P0})", SugestaoMemoria(_processos.PorMemoria), ToolTipIcon.Warning);
     }
 
     void VerificarDiscoCheio()

@@ -34,6 +34,7 @@ public class FormPrincipal : Form
     readonly AbaLimpeza abaLimpeza = new();
     readonly NotifyIcon trayIcon = new() { Text = NomeApp };
     bool _saindoDeVerdade;
+    BotaoNavegacao? _botaoDoUltimoAviso;
 
     public FormPrincipal(string arquivoConfig, HistoricoLog log, AgendadorTarefa agendador, HistoricoRede historicoRede)
     {
@@ -122,7 +123,11 @@ public class FormPrincipal : Form
         botao.CheckedChanged += (s, e) => { if (botao.Checked) MostrarAba(aba); };
         // Avisos na bandeja (internet caiu/voltou, aparelho novo na rede)
         if (aba is INotificador notificador)
-            notificador.Notificar += (titulo, texto, icone) => trayIcon.ShowBalloonTip(6000, titulo, texto, icone);
+            notificador.Notificar += (titulo, texto, icone) =>
+            {
+                _botaoDoUltimoAviso = botao;
+                trayIcon.ShowBalloonTip(6000, titulo, texto, icone);
+            };
 
         if (aba is IAbaUtilitario utilitario)
             utilitario.AlturaMudou += (s, e) => { if (aba == _abaAtual) PosicionarAba(); };
@@ -244,6 +249,11 @@ public class FormPrincipal : Form
         menu.Items.Add("Sair", null, (s, e) => { _saindoDeVerdade = true; Close(); });
         trayIcon.ContextMenuStrip = menu;
         trayIcon.DoubleClick += (s, e) => MostrarJanela();
+        trayIcon.BalloonTipClicked += (s, e) =>
+        {
+            MostrarJanela();
+            if (_botaoDoUltimoAviso != null) _botaoDoUltimoAviso.Checked = true;   // abre a tela que avisou
+        };
         trayIcon.Visible = true;
     }
 

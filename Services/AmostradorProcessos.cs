@@ -15,6 +15,15 @@ public sealed class AmostradorProcessos
     readonly Dictionary<string, (string Nome, string Caminho)> _nomes = new(StringComparer.OrdinalIgnoreCase);
     DateTime _leituraAnterior = DateTime.MinValue;
 
+    // Da última leitura: os que mais usam memória (para o diagnóstico de memória cheia)
+    public List<ProcessoPesado> PorMemoria { get; private set; } = new();
+
+    // A máquina virtual do WSL/Docker aparece como "vmmem": nome que a pessoa reconhece
+    string NomeExibido(string processo) =>
+        processo.StartsWith("vmmem", StringComparison.OrdinalIgnoreCase) ? "WSL / Docker (máquina virtual)" : _nomes[processo].Nome;
+
+    public static bool EhWsl(ProcessoPesado p) => p.Nome.StartsWith("WSL", StringComparison.Ordinal);
+
     public List<ProcessoPesado> Ler(int quantidade)
     {
         var agora = DateTime.UtcNow;
@@ -53,9 +62,12 @@ public sealed class AmostradorProcessos
         }
         foreach (var pid in _tempoAnterior.Keys.Where(p => !vistos.Contains(p)).ToList()) _tempoAnterior.Remove(pid);
 
-        return porNome
+        var todos = porNome
             .Where(kv => !kv.Key.Equals("Idle", StringComparison.OrdinalIgnoreCase))
-            .Select(kv => new ProcessoPesado(_nomes[kv.Key].Nome, _nomes[kv.Key].Caminho, kv.Value.Cpu, kv.Value.Memoria))
+            .Select(kv => new ProcessoPesado(NomeExibido(kv.Key), _nomes[kv.Key].Caminho, kv.Value.Cpu, kv.Value.Memoria))
+            .ToList();
+        PorMemoria = todos.OrderByDescending(p => p.Memoria).Take(quantidade).ToList();
+        return todos
             .OrderByDescending(p => Math.Round(p.Cpu))
             .ThenByDescending(p => p.Memoria)
             .Take(quantidade)
