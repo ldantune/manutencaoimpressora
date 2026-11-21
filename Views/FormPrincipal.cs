@@ -33,7 +33,13 @@ public class FormPrincipal : Form
     readonly AbaEnergia abaEnergia = new();
     readonly AbaLimpeza abaLimpeza = new();
     readonly NotifyIcon trayIcon = new() { Text = NomeApp };
+    readonly BotaoFluent btnVerificarAtualizacao = new()
+    {
+        Text = "Procurar atualização", Icone = Icones.Atualizar, Estilo = EstiloBotao.Sutil,
+        Dock = DockStyle.Bottom, Margin = new Padding(8, 8, 8, 4)
+    };
     bool _saindoDeVerdade;
+    bool _verificandoAtualizacao;
     BotaoNavegacao? _botaoDoUltimoAviso;
 
     public FormPrincipal(string arquivoConfig, HistoricoLog log, AgendadorTarefa agendador, HistoricoRede historicoRede)
@@ -72,6 +78,8 @@ public class FormPrincipal : Form
         AdicionarAba("Limpeza", Icones.Limpeza, abaLimpeza);
         AdicionarGrupo("Impressão");
         AdicionarAba("Impressora", Icones.Imprimir, abaImpressora);
+        btnVerificarAtualizacao.Click += async (s, e) => await VerificarAtualizacaoAsync(manual: true);
+        menuLateral.Controls.Add(btnVerificarAtualizacao);
         Controls.Add(menuLateral);
         Controls.Add(areaConteudo);
         areaConteudo.BringToFront();   // o Fill precisa ser encaixado por último
@@ -88,7 +96,7 @@ public class FormPrincipal : Form
         Load += (s, e) => RestaurarEstadoJanela();
         Load += (s, e) => PosicionarAba();
         Shown += (s, e) => Invalidate(true);
-        Load += async (s, e) => await VerificarAtualizacaoAsync();
+        Load += async (s, e) => await VerificarAtualizacaoAsync(manual: false);
         Load += (s, e) => abaImpressora.VerificarFalhasRecentes();
     }
 
@@ -324,11 +332,46 @@ public class FormPrincipal : Form
 
     // ---------------- Atualização automática ----------------
 
-    async Task VerificarAtualizacaoAsync()
+    async Task VerificarAtualizacaoAsync(bool manual)
     {
+        if (_verificandoAtualizacao) return;
+        _verificandoAtualizacao = true;
+        if (manual)
+        {
+            btnVerificarAtualizacao.Enabled = false;
+            btnVerificarAtualizacao.Text = "Procurando…";
+        }
+
         var verificador = new VerificadorAtualizacao();
-        var atualizacao = await verificador.VerificarAsync();
-        if (atualizacao is null) return;
+        AtualizacaoDisponivel? atualizacao;
+        try
+        {
+            atualizacao = await verificador.VerificarAsync();
+        }
+        catch (Exception ex)
+        {
+            if (manual)
+                MessageBox.Show("Não foi possível procurar atualizações: " + ex.Message, Text,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            atualizacao = null;
+        }
+        finally
+        {
+            _verificandoAtualizacao = false;
+            if (manual)
+            {
+                btnVerificarAtualizacao.Enabled = true;
+                btnVerificarAtualizacao.Text = "Procurar atualização";
+            }
+        }
+
+        if (atualizacao is null)
+        {
+            if (manual)
+                MessageBox.Show("Você já está com a versão mais recente.", Text,
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
 
         var resposta = MessageBox.Show(
             $"Uma nova versão (v{atualizacao.Versao}) está disponível. Baixar e instalar agora?\n\n" +

@@ -10,7 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ManutencaoImpressora</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <Version>2.1.2</Version>
+    <Version>2.1.3</Version>
     <ApplicationIcon>icone.ico</ApplicationIcon>
     <!-- WFO1000 (.NET 9+): avisa sobre propriedades públicas de controles sem configuração para o
          designer do Visual Studio. Os controles daqui são montados em código, não no designer. -->
